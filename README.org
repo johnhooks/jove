@@ -1,0 +1,44 @@
+#+TITLE:  An Elisp JavaScript Editing Mode
+#+AUTHOR: John Hooks
+#+EMAIL:  john@bitmachina.com
+#+DATE: <2017-04-12 Wed>
+#+STARTUP: indent
+#+STARTUP: hidestars
+
+** About
+An attempt to create a new JavaScript editing mode for Emacs.
+*** Inspiration
+- [[https://github.com/marijnh/parse-js][parse-js]] written in Common Lisp by Marijn Haverbeke
+- [[https://github.com/codemirror/CodeMirror/blob/master/mode/javascript/javascript.js][CodeMirror]]
+- [[https://github.com/ternjs/acorn][Acorn]]
+- [[https://github.com/mishoo/UglifyJS2][UglifyJS]]
+- [[https://github.com/mooz/js2-mode][js2-mode]]
+*** Reading on JavaScript Parsers
+- [[http://codemirror.net/1/story.html][Implementing a Syntax-Highlighting JavaScript Editor—In JavaScript]]
+- [[http://marijnhaverbeke.nl/blog/acorn.html][Acorn: yet another JavaScript parser]]
+- [[http://lisperator.net/pltut/][How to implement a programming language in JavaScript]]
+** Installation
+Probably shouldn't not do that now...
+
+The lexer is the only functional component at the moment.
+
+** Goals   
+Create a simple syntax parser to allow more complex highlighting and
+indentation of code while editing JavaScript in Emacs buffers.
+
+** Reasoning
+Shear madness.
+
+After getting frustrated during an attempt to modify the indentation
+functionality of ~js.el~, I concluded a simple syntax parser would
+provide a more complete understanding of the code for editing
+purposes. Plus I needed something to do in my spare time.
+
+** Working
+Most functions of the lexer are complete and are tested. I have been
+performing informal tests of the lexer with [[http://underscorejs.org/][Underscore.js]] and it seems
+to be tokenizing everything correctly.
+
+Soon work on the parser will begin. I am currently studying the
+JavaScript mode of [[https://github.com/codemirror/CodeMirror/blob/master/mode/javascript/javascript.js][CodeMirror]]. The intent of its parser is the
+exact same as my own, provide syntax highlighting and indentation.

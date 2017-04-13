@@ -1,0 +1,9 @@
+# emacs backups, auto-save symbolic links, and compiled files
+
+scratch.*
+
+*~
+.#*
+*.elc
+
+.DS_Store
