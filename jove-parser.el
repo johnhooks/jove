@@ -1,21 +1,21 @@
-;;;; jove-parser.el --- A JavaScript Mode -*- lexical-binding: t; -*-
+;;;; jove-parser.el --- The Jove Parser -*- lexical-binding: t; -*-
 
 ;;; Copyright (C) 2017 John Hooks
 
-;; This file is part of jove
+;; This file is part of Jove
 ;;
-;; jove is free software: you can redistribute it and/or modify
+;; Jove is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation, either version 3 of the License, or
 ;; (at your option) any later version.
 ;;
-;; jove is distributed in the hope that it will be useful,
+;; Jove is distributed in the hope that it will be useful,
 ;; but WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 ;; GNU General Public License for more details.
 ;;
 ;; You should have received a copy of the GNU General Public License
-;; along with jove.  If not, see <http://www.gnu.org/licenses/>.
+;; along with Jove.  If not, see <http://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 

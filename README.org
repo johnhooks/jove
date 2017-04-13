@@ -1,12 +1,16 @@
-#+TITLE:  An Elisp JavaScript Editing Mode
+#+TITLE:  An Emacs JavaScript Editing Mode
 #+AUTHOR: John Hooks
 #+EMAIL:  john@bitmachina.com
-#+DATE: <2017-04-12 Wed>
+#+DATE: <2017-04-13 Thu>
 #+STARTUP: indent
 #+STARTUP: hidestars
 
 ** About
-An attempt to create a new JavaScript editing mode for Emacs.
+This project is an attempt to create a new JavaScript editing mode for Emacs. 
+
+Jove includes a striped down port of the [[https://github.com/ternjs/acorn][Acorn]] parser in order to provide
+complex highlighting and indentation functionality.
+
 *** Inspiration
 - [[https://github.com/marijnh/parse-js][parse-js]] written in Common Lisp by Marijn Haverbeke
 - [[https://github.com/codemirror/CodeMirror/blob/master/mode/javascript/javascript.js][CodeMirror]]
@@ -22,9 +26,14 @@ Probably shouldn't not do that now...
 
 The lexer is the only functional component at the moment.
 
-** Goals   
-Create a simple syntax parser to allow more complex highlighting and
-indentation of code while editing JavaScript in Emacs buffers.
+** Goals
+1. Provide proper indentation of
+   - arrow functions (in the works)
+   - conditional expressions (in the works)
+2. Provide proper highlighting of
+   - template strings
+   - regular expressions
+3. Provide functionality for JSX (a ways off)
 
 ** Reasoning
 Shear madness.

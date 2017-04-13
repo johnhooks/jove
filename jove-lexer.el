@@ -1,58 +1,61 @@
-;;;; jove-lexer.el --- A JavaScript Mode -*- lexical-binding: t; -*-
+;;;; jove-lexer.el --- The Jove Lexer -*- lexical-binding: t; -*-
 
 ;;; Copyright (C) 2017 John Hooks
 
-;; This file is part of jove
+;; This file is part of Jove
 ;;
-;; jove is free software: you can redistribute it and/or modify
+;; Jove is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation, either version 3 of the License, or
 ;; (at your option) any later version.
 ;;
-;; jove is distributed in the hope that it will be useful,
+;; Jove is distributed in the hope that it will be useful,
 ;; but WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 ;; GNU General Public License for more details.
 ;;
 ;; You should have received a copy of the GNU General Public License
-;; along with jove.  If not, see <http://www.gnu.org/licenses/>.
+;; along with Jove.  If not, see <http://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
 ;;; Code:
 
-(require 'jove-token-types)
+(defgroup jove-mode nil
+  "A JavaScript mode."
+  :group 'languages)
 
 (defcustom jove-ecma-version 6
   "ECMAScript version used to parse."
   :type 'number
-  :group 'jove)
+  :group 'jove-mode)
 
 (defcustom jove-always-strict t
   "Parse all JavaScript as module code."
   :type 'boolean
-  :group 'jove)
+  :group 'jove-mode)
 
-(setq jove--strict t)
+(setq jove--strict t)                       ; HACK
 
 (defcustom jove-verbose nil
   "Print information about parse to *Messages* buffer."
   :type 'boolean
-  :group 'jove)
+  :group 'jove-mode)
 
 (defcustom jove-lexer-ceiling (/ 1.0 45)   ; Changed from 30
   "Maximum amount of time to chunk the lexer."
   :type 'number
-  :group 'jove)
+  :group 'jove-mode)
 
 (defcustom jove-lexer-timeout (/ 1.0 100)
   "Amount of time to pause the lexer."
   :type 'number
-  :group 'jove)
+  :group 'jove-mode)
 
 ;;; Local Variables
 
-(defvar-local jove--lexer-state nil)
+(defvar-local jove--parsing nil "Private variable.")
+(defvar-local jove--fontifications nil "Private variable.")
 
 (defvar-local jove--string-buffer nil
   "List of chars built up while scanning various tokens.")
@@ -68,20 +71,36 @@
 (defvar-local jove-lexer-complete-hook nil
   "Hook called after lexical process is complete.")
 
-(defvar-local jove-comment-hook nil
+(defvar jove-comment-hook nil
   "Abnormal hook for comments, args start and end.")
 
-(defvar-local jove-keyword-hook nil
-  "Hook for keyword tokens.")
+;;; TODO put these some where that makes sense...
 
-(defvar-local jove-regexp-hook nil
-  "Hook for regular expression tokens.")
+(defsubst jove--clear-face (beg end)
+  (remove-text-properties beg end '(font-lock-face nil)))
 
-(defvar-local jove-string-hook nil
-  "Hook for string tokens.")
+(defun jove--apply-fontifications (start end)
+  "Apply highlighting after lexer completes a chunk."
+  (with-silent-modifications
+    (jove--clear-face start end)
+    (seq-do #'(lambda (f) (put-text-property (aref f 0) (aref f 1) 'font-lock-face (aref f 2)))
+            jove--fontifications)
+    (seq-do #'(lambda (f) (put-text-property (aref f 0) (aref f 1) 'font-lock-face font-lock-warning-face))
+            jove--warnings)
+    ;; (dolist (f jove--fontifications)
+    ;;   (put-text-property (aref f 0) (aref f 1) 'font-lock-face (aref f 2)))
+    ;; (dolist (f jove--warnings)
+    ;;   (put-text-property (aref f 0) (aref f 1) 'font-lock-face font-lock-warning-face))
+    (setq jove--fontifications nil
+          jove--warnings nil)))     ; Probably shouldn't reset here.
 
-(defvar-local jove-template-hook nil
-  "Hook for template literal tokens.")
+(defun jove--set-face (beg end face)
+  "Fontify a region.  If RECORD is non-nil, record for later."
+  (setq beg (min (point-max) beg)
+        beg (max (point-min) beg)
+        end (min (point-max) end)
+        end (max (point-min) end))
+  (push (vector beg end face) jove--fontifications))
 
 ;;; Errors
 
@@ -90,16 +109,189 @@
 (define-error 'jove-unexpected-character-error
   "Unexpected character" 'jove-error)
 
-;;; Context Types
+;;; Token Types
 
-;; 0 token
-;; 1 is-expr
-;; 2 preserve-space
-;; 3 override
+(defvar jove-keywords (make-hash-table :test 'equal)
+  "Hash table to map keyword names to token types.")
+
+;; Quoted from acorn/src/tokentype.js
+
+;;   "The assignment of fine-grained, information-carrying type objects
+;;    allows the tokenizer to store the information it has about a
+;;    token in a way that is very cheap for the parser to look up.
+
+;;    All token type variables start with an underscore, to make them
+;;    easy to recognize.
+
+;;    The `beforeExpr` property is used to disambiguate between regular
+;;    expressions and divisions. It is set on all token types that can
+;;    be followed by an expression (thus, a slash after them would be a
+;;    regular expression).
+;;
+;;    The `startsExpr` property is used to check if the token ends a
+;;    `yield` expression. It is set on all token types that either can
+;;    directly start an expression (like a quotation mark) or can
+;;    continue an expression (like the body of a string).
+;;
+;;    `isLoop` marks a keyword as starting a loop, which is important
+;;    to know when parsing a label, in order to allow or disallow
+;;    continue jumps to that label."
+
+(cl-defun jove--tt-create (label &key keyword before-expr starts-expr
+                             is-loop is-assign prefix postfix binop)
+  "Return a vector representing a token type."
+  ;; update-ctx is handled in `jove--update-ctx'
+  (vector label                         ; 0
+          keyword                       ; 1
+          before-expr                   ; 2
+          starts-expr                   ; 3
+          is-loop                       ; 4
+          is-assign                     ; 5
+          prefix                        ; 6
+          postfix                       ; 7
+          binop))                       ; 8
+
+(defsubst jove--tt-label (tt)
+  (aref tt 0))
+(defsubst jove--tt-keyword (tt)
+  (aref tt 1))
+(defsubst jove--tt-before-expr (tt)
+  (aref tt 2))
+(defsubst jove--tt-starts-expr (tt)
+  (aref tt 3))
+(defsubst jove--tt-is-loop (tt)
+  (aref tt 4))
+(defsubst jove--tt-is-assign (tt)
+  (aref tt 5))
+(defsubst jove--tt-is-prefix (tt)
+  (aref tt 6))
+(defsubst jove--tt-is-postfix (tt)
+  (aref tt 7))
+(defsubst jove--tt-binop (tt)
+  (aref tt 8))
+
+(defun jove--binop-create (label prec)
+  "Return a vector representing a binary operator token type."
+  (jove--tt-create label :before-expr t :binop prec))
+
+(defmacro jove--keyword-create (label &rest options)
+  "Return a vector representing a keyword token type."
+  `(puthash (intern ,label)
+            (jove--tt-create ,label :keyword t ,@options)
+            jove-keywords))
+
+(defconst jove-NUM (jove--tt-create "num" :starts-expr t))
+(defconst jove-REGEXP (jove--tt-create "regexp" :starts-expr t))
+(defconst jove-STRING (jove--tt-create "string" :starts-expr t))
+(defconst jove-NAME (jove--tt-create "name" :starts-expr t))
+(defconst jove-EOF (jove--tt-create "eof"))
+
+;;; Punctuation Token Types
+
+(defconst jove-BRACE-L (jove--tt-create "{" :before-expr t :starts-expr t))
+(defconst jove-BRACE-R (jove--tt-create "}"))
+(defconst jove-PAREN-L (jove--tt-create "(" :before-expr t :starts-expr t))
+(defconst jove-PAREN-R (jove--tt-create ")"))
+(defconst jove-BRACKET-L (jove--tt-create "[" :before-expr t :starts-expr t))
+(defconst jove-BRACKET-R (jove--tt-create "]"))
+(defconst jove-COMMA (jove--tt-create "," :before-expr t))
+(defconst jove-SEMI (jove--tt-create ";" :before-expr t))
+(defconst jove-COLON (jove--tt-create ":" :before-expr t))
+(defconst jove-DOT (jove--tt-create "."))
+(defconst jove-QUESTION (jove--tt-create "?" :before-expr t))
+(defconst jove-ARROW (jove--tt-create "=>" :before-expr t))
+(defconst jove-TEMPLATE (jove--tt-create "template"))
+(defconst jove-ELLIPSIS (jove--tt-create "..." :before-expr t))
+(defconst jove-DOLLAR-BRACE-L (jove--tt-create "${" :before-expr t :starts-expr t))
+(defconst jove-BACKQUOTE (jove--tt-create "`" :before-expr t))
+
+;;; Operator Token Types
+
+;; Quoted from acorn/src/tokentypes.js
+
+;;  "Operators. These carry several kinds of properties to help the
+;;   parser use them properly (the presence of these properties is
+;;   what categorizes them as operators).
+;;
+;;   `binop`, when present, specifies that this operator is a binary
+;;   operator, and will refer to its precedence.
+;;
+;;   `prefix` and `postfix` mark the operator as a prefix or postfix
+;;   unary operator.
+;;
+;;   `isAssign` marks all of `=`, `+=`, `-=` etcetera, which act as
+;;   binary operators with a very low precedence, that should result
+;;   in AssignmentExpression nodes."
+
+(defconst jove-EQ (jove--tt-create "=" :before-expr t :is-assign t))
+(defconst jove-ASSIGN (jove--tt-create "_=" :before-expr t :is-assign t))
+(defconst jove-INC-DEC (jove--tt-create "++/--" :starts-expr t :prefix t :postfix t))
+(defconst jove-PREFIX (jove--tt-create "prefix" :before-expr t :starts-expr t :prefix t))
+(defconst jove-LOGICAL-OR (jove--binop-create "||" 1))
+(defconst jove-LOGICAL-AND (jove--binop-create "&&" 2))
+(defconst jove-BITWISE-OR (jove--binop-create "|" 3))
+(defconst jove-BITWISE-XOR (jove--binop-create "^" 4))
+(defconst jove-BITWISE-AND (jove--binop-create "&" 5))
+(defconst jove-EQUALITY (jove--binop-create "==/!=" 6)) ; == != === !==
+(defconst jove-RELATIONAL (jove--binop-create "</>" 7)) ; < > <= >=
+(defconst jove-BITSHIFT (jove--binop-create "<</>>" 8)) ; << >> >>>
+(defconst jove-PLUS-MIN (jove--tt-create "+/-"
+                                 :binop 9
+                                 :before-expr t
+                                 :starts-expr t
+                                 :prefix t))
+(defconst jove-MODULO (jove--binop-create "%" 10))
+(defconst jove-STAR (jove--binop-create "*" 10))
+(defconst jove-SLASH (jove--binop-create "/" 10))
+(defconst jove-STARSTAR (jove--tt-create "**" :before-expr t))
+
+;;; Keywords Token Types
+
+(defconst jove-BREAK (jove--keyword-create "break"))
+(defconst jove-CASE (jove--keyword-create "case" :before-expr t))
+(defconst jove-CATCH (jove--keyword-create "catch"))
+(defconst jove-CONTINUE (jove--keyword-create "continue"))
+(defconst jove-DEBUGGER (jove--keyword-create "debugger"))
+(defconst jove-DEFAULT (jove--keyword-create "default"))
+(defconst jove-DO (jove--keyword-create "do" :is-loop t :before-expr t))
+(defconst jove-ELSE (jove--keyword-create "else" :before-expr t))
+(defconst jove-FINALLY (jove--keyword-create "finally"))
+(defconst jove-FOR (jove--keyword-create "for" :is-loop t))
+(defconst jove-FUNCTION (jove--keyword-create "function" :starts-expr t))
+(defconst jove-IF (jove--keyword-create "if"))
+(defconst jove-RETURN (jove--keyword-create "return" :before-expr t))
+(defconst jove-SWITCH (jove--keyword-create "switch"))
+(defconst jove-THROW (jove--keyword-create "throw" :before-expr t))
+(defconst jove-TRY (jove--keyword-create "try"))
+(defconst jove-VAR (jove--keyword-create "var"))
+(defconst jove-CONST (jove--keyword-create "const"))
+(defconst jove-WHILE (jove--keyword-create "while" :is-loop t))
+(defconst jove-WITH (jove--keyword-create "with"))
+(defconst jove-NEW (jove--keyword-create "new" :before-expr t :starts-expr t))
+(defconst jove-THIS (jove--keyword-create "this" :starts-expr t))
+(defconst jove-SUPER (jove--keyword-create "super" :starts-expr t))
+(defconst jove-CLASS (jove--keyword-create "class"))
+(defconst jove-EXTENDS (jove--keyword-create "extends" :before-expr t))
+(defconst jove-EXPORT (jove--keyword-create "export"))
+(defconst jove-IMPORT (jove--keyword-create "import"))
+(defconst jove-NULL (jove--keyword-create "null" :starts-expr t))
+(defconst jove-UNDEFINED (jove--keyword-create "undefined" :starts-expr t))
+(defconst jove-TRUE (jove--keyword-create "true" :starts-expr t))
+(defconst jove-FALSE (jove--keyword-create "false" :starts-expr t))
+(defconst jove-IN (jove--keyword-create "in" :binop 7 :before-expr t))
+(defconst jove-INSTANCEOF (jove--keyword-create "instanceof" :binop 7 :before-expr t))
+(defconst jove-TYPEOF (jove--keyword-create "typeof" :prefix t :before-expr t :starts-expr t))
+(defconst jove-VOID (jove--keyword-create "void" :prefix t :before-expr t :starts-expr t))
+(defconst jove-DELETE (jove--keyword-create "delete" :prefix t :before-expr t :starts-expr t))
+
+;;; Context Types
 
 (cl-defun jove--ctx-create (token &key is-expr preserve-space override)
   "Return a vector representing a context type."
-  (vector token is-expr preserve-space override))
+  (vector token                         ; 0
+          is-expr                       ; 1
+          preserve-space                ; 2
+          override))                    ; 3
 
 (defsubst jove--ctx-token (ctx)
   (aref ctx 0))
@@ -134,18 +326,16 @@
 ;; Unlike Acorn, this parser is working inside an Emacs buffer, in
 ;; which positions are between characters and start at 1
 
-;; 0 start
-;; 1 end
-;; 2 type
-;; 3 value
-;; 4 ctx-stack
-;; 5 expr-allowed
-;; 6 newline-before
-;; 7 contains-escape
-
 (defun jove--lex-create ()
   "Return a vector representing an initial lexer state."
-  (vector 1 1 jove-EOF nil (jove--initial-ctx) t nil nil))
+  (vector 1                             ; 0 start
+          1                             ; 1 end
+          jove-EOF                          ; 2 type
+          nil                           ; 3 value
+          (jove--initial-ctx)               ; 4 ctx-stack
+          t                             ; 5 expr-allowed
+          nil                           ; 6 newline-before
+          nil))                         ; 7 contains-esc
 
 (defun jove--lex-p (state)
   "Predicate returns t if STATE is a lexer state."
@@ -217,14 +407,12 @@
 ;; I don't know if token will be necessary because all the relevent information
 ;; is contained in the lexer state.
 
-;; 0 start
-;; 1 end
-;; 2 type
-;; 3 value
-
 (defun jove--token-create (start end type &optional value)
   "Return a vector representing a token."
-  (vector start end type value))
+  (vector start                         ; 0
+          end                           ; 1
+          type                          ; 2
+          value))                       ; 3
 
 (defun jove--token-p (object)
   "Return non-nil if OBJECT could represent a token."
@@ -248,7 +436,7 @@
 
 (defun jove--warn (start end message)
   "Queue a MESSAGE into `jove--warnings'."
-  (push (list start end message) jove--warnings)
+  (push (vector start end message) jove--warnings)
   nil)                                  ; Return nil
 
 (defun jove--unexpected-char ()
@@ -339,6 +527,7 @@ Otherwise signal `jove-unexpected-character-error'."
     (if (search-forward "\n" nil t)
         (jove--set-newline-before state t)
       (goto-char (point-max)))
+    (jove--set-face start (point) font-lock-comment-face)
     (run-hook-with-args 'jove-comment-hook start (point))))
 
 (defun jove--skip-block-comment (state)
@@ -353,6 +542,7 @@ Otherwise signal `jove-unexpected-character-error'."
         (progn
           (goto-char (point-max))
           (jove--warn (jove--start state) (point-max) "Missing comment closing delimiter")))
+    (jove--set-face start (point) font-lock-comment-face)
     (run-hook-with-args 'jove-comment-hook start (point))))
 
 (defun jove--skip-space (state)
@@ -384,85 +574,87 @@ Otherwise signal `jove-unexpected-character-error'."
 
 (defun jove--brace-is-block-p (state prev-tt)
   "Use `jove--current-ctx' and PREV-TT to determine if brace is a block."
-  (cond ((eq jove-COLON prev-tt)
-         ;; If previous token type is a colon, determine its use as either
-         ;; a statement label or a property key in an object literal.
-         (let ((parent (jove--current-ctx state)))
-           (if (or (eq jove-B-STAT parent)
-                   (eq jove-B-EXPR parent))
-               (not (jove--ctx-is-expr parent)))))
-        ((eq jove-RETURN prev-tt)
-         (jove--newline-before state))
-        ((memq prev-tt (list jove-ELSE jove-SEMI jove-EOF jove-PAREN-R))
-         t)
-        ((eq jove-BRACE-L prev-tt)
-         (eq jove-B-STAT (jove--current-ctx state)))
-        (t
-         (not (jove--expr-allowed state)))))
+  (cond
+   ((eq jove-COLON prev-tt)
+    ;; If previous token type is a colon, determine its use as either
+    ;; a statement label or a property key in an object literal.
+    (let ((parent (jove--current-ctx state)))
+      (if (or (eq jove-B-STAT parent)
+              (eq jove-B-EXPR parent))
+          (not (jove--ctx-is-expr parent)))))
+   ((eq jove-RETURN prev-tt)
+    (jove--newline-before state))
+   ((memq prev-tt (list jove-ELSE jove-SEMI jove-EOF jove-PAREN-R))
+    t)
+   ((eq jove-BRACE-L prev-tt)
+    (eq jove-B-STAT (jove--current-ctx state)))
+   (t
+    (not (jove--expr-allowed state)))))
 
 (defun jove--update-ctx (state prev-tt)
   "Modify ctx-stack and expr-allowed of STATE to reflect change of PREV-TT."
   (let ((type (jove--type state)))
-    (cond ((and (jove--tt-keyword type)
-                (eq jove-DOT prev-tt))
-           ;; Don't know what situation this is trying to catch.
-           (jove--set-expr-allowed state nil))
-          ;; '{'  Enter brace statement, expression context.
-          ((eq jove-BRACE-L type)
-           (jove--ctx-stack-push state (if (jove--brace-is-block-p state prev-tt)
-                                       jove-B-STAT
-                                     jove-B-EXPR))
-           (jove--set-expr-allowed state t))
-          ;; '}' or ')'  Exit either brace or paren context.
-          ((or (eq jove-BRACE-R type)
-               (eq jove-PAREN-R type))
-           (if (= 1 (length (jove--ctx-stack state)))
-               (jove--set-expr-allowed state t)
-             (let ((out (jove--ctx-stack-pop state)))
-               (cond
-                ((and (eq jove-B-STAT out)
-                      (eq jove-F-EXPR (jove--current-ctx state)))
-                 (jove--ctx-stack-pop state) ; Exit of function body.
-                 (jove--set-expr-allowed state nil))
-                ((eq jove-B-TMPL out)
-                 (jove--set-expr-allowed state t))
-                (t
-                 (jove--set-expr-allowed state (not (jove--ctx-is-expr out))))))))
-          ;; ?(  Enter parenthesis context.
-          ((eq jove-PAREN-L type)
-           (jove--ctx-stack-push state (if (or (eq jove-IF prev-tt)
-                                           (eq jove-FOR prev-tt)
-                                           (eq jove-WITH prev-tt)
-                                           (eq jove-WHILE prev-tt))
-                                       jove-P-STAT
-                                     jove-P-EXPR))
-           (jove--set-expr-allowed state t))
-          ;; '${' Enter brace template context.
-          ((eq jove-DOLLAR-BRACE-L type)
-           (jove--ctx-stack-push state jove-B-TMPL)
-           (jove--set-expr-allowed state t))
-          ;; '`'  Enter or exit a template literal context.
-          ((eq jove-BACKQUOTE type)
-           (if (eq jove-Q-TMPL (jove--current-ctx state))
-               (jove--ctx-stack-pop state)
-             (jove--ctx-stack-push state jove-Q-TMPL))
-           (jove--set-expr-allowed state nil))
-          ;; '--' or '++'  Do not alter `jove--expr-allowed'.
-          ((eq jove-INC-DEC type))
-          ;; 'function'  Enter function expression context.
-          ((eq jove-FUNCTION type)
-           (if (and (jove--tt-before-expr prev-tt)
-                    (not (or (eq jove-SEMI prev-tt)
-                             (eq jove-ELSE prev-tt)
-                             (eq jove-COLON prev-tt)
-                             (eq jove-BRACE-L prev-tt)))
-                    (eq jove-B-STAT (jove--current-ctx state)))
-               (jove--ctx-stack-push state jove-F-EXPR))
-           (jove--set-expr-allowed state nil))
-          ;; If the token type does not have before-expr in its alist
-          ;; `jove--expr-allowed' will be set to nil.
-          (t
-           (jove--set-expr-allowed state (jove--tt-before-expr type))))))
+    (cond
+     ((and (jove--tt-keyword type)
+           (eq jove-DOT prev-tt))
+      ;; Don't know what situation this is trying to catch.
+      (jove--set-expr-allowed state nil))
+     ;; '{'  Enter brace statement, expression context.
+     ((eq jove-BRACE-L type)
+      (jove--ctx-stack-push state (if (jove--brace-is-block-p state prev-tt)
+                                  jove-B-STAT
+                                jove-B-EXPR))
+      (jove--set-expr-allowed state t))
+     ;; '}' or ')'  Exit either brace or paren context.
+     ((or (eq jove-BRACE-R type)
+          (eq jove-PAREN-R type))
+      (if (= 1 (length (jove--ctx-stack state)))
+          (jove--set-expr-allowed state t)
+        (let ((out (jove--ctx-stack-pop state)))
+          (cond
+           ((and (eq jove-B-STAT out)
+                 (eq jove-F-EXPR (jove--current-ctx state)))
+            (jove--ctx-stack-pop state) ; Exit of function body.
+            (jove--set-expr-allowed state nil))
+           ((eq jove-B-TMPL out)
+            (jove--set-expr-allowed state t))
+           (t
+            (jove--set-expr-allowed state (not (jove--ctx-is-expr out))))))))
+     ;; ?(  Enter parenthesis context.
+     ((eq jove-PAREN-L type)
+      (jove--ctx-stack-push state (if (or (eq jove-IF prev-tt)
+                                      (eq jove-FOR prev-tt)
+                                      (eq jove-WITH prev-tt)
+                                      (eq jove-WHILE prev-tt))
+                                  jove-P-STAT
+                                jove-P-EXPR))
+      (jove--set-expr-allowed state t))
+     ;; '${' Enter brace template context.
+     ((eq jove-DOLLAR-BRACE-L type)
+      (jove--ctx-stack-push state jove-B-TMPL)
+      (jove--set-expr-allowed state t))
+     ;; '`'  Enter or exit a template literal context.
+     ((eq jove-BACKQUOTE type)
+      (if (eq jove-Q-TMPL (jove--current-ctx state))
+          (jove--ctx-stack-pop state)
+        (jove--ctx-stack-push state jove-Q-TMPL))
+      (jove--set-expr-allowed state nil))
+     ;; '--' or '++'  Do not alter `jove--expr-allowed'.
+     ((eq jove-INC-DEC type))
+     ;; 'function'  Enter function expression context.
+     ((eq jove-FUNCTION type)
+      (if (and (jove--tt-before-expr prev-tt)
+               (not (or (eq jove-SEMI prev-tt)
+                        (eq jove-ELSE prev-tt)
+                        (eq jove-COLON prev-tt)
+                        (eq jove-BRACE-L prev-tt)))
+               (eq jove-B-STAT (jove--current-ctx state)))
+          (jove--ctx-stack-push state jove-F-EXPR))
+      (jove--set-expr-allowed state nil))
+     ;; If the token type does not have before-expr in its alist
+     ;; `jove--expr-allowed' will be set to nil.
+     (t
+      (jove--set-expr-allowed state (jove--tt-before-expr type))))))
 
 ;;; Token Reading Functions
 
@@ -725,7 +917,7 @@ Criteria include ending delimiter and flags."
         (jove--warn (jove--start state) (point) "Missing regular expression closing delimiter")))))
   (skip-syntax-forward "w")       ; Advance over flags, valid or not
   (jove--finish-token state jove-REGEXP)
-  (run-hooks 'jove-regexp-hook))            ; Will need to pass state and end to hooks???
+  (jove--set-face (jove--start state) (point) font-lock-string-face))
 
 (defun jove--read-string (state punc)
   "Search for ending delimiter matching PUNC.
@@ -752,7 +944,7 @@ delimiter."
         (setq looking nil)
         (jove--warn (jove--start state) (point) "Missing string closing delimiter")))))
   (jove--finish-token state jove-STRING)
-  (run-hooks 'jove-string-hook))            ; Will need to pass start and end to hooks???
+  (jove--set-face (jove--start state) (point) font-lock-string-face))
 
 (defun jove--string-builder (list)
   "Return a string built from a LIST of strings."
@@ -772,10 +964,10 @@ delimiter."
               (progn
                 (forward-char)
                 (jove--finish-token state jove-BACKQUOTE)
-                (run-hooks 'jove-template-hook) ; Will need to pass start and end to hooks???
+                (jove--set-face (jove--start state) (point) font-lock-string-face)
                 (throw 'token nil))
             (jove--finish-token state jove-TEMPLATE)
-            (run-hooks 'jove-template-hook)
+            (jove--set-face (jove--start state) (point) font-lock-string-face)
             (throw 'token nil)))
          ((eq ?\$ char)
           (if (eq ?\{ (jove--peek))
@@ -786,7 +978,7 @@ delimiter."
                     (jove--finish-token state jove-DOLLAR-BRACE-L)
                     (throw 'token nil))
                 (jove--finish-token state jove-TEMPLATE)
-                (run-hooks 'jove-template-hook)
+                (jove--set-face (jove--start state) (point) font-lock-string-face)
                 (throw 'token nil))
             ;; Its possible to catch a single '$' which is part of the
             ;; literal template string. So it is necessary to always
@@ -867,7 +1059,7 @@ delimiter."
                      jove-NAME)))
     (jove--finish-token state type word)
     (when (jove--tt-keyword type)
-      (run-hooks 'jove-keyword-hook))))
+      (jove--set-face (jove--start state) (point) font-lock-keyword-face))))
 
 (defun jove--read-token (state char)
   "Read token from CHAR."
@@ -932,8 +1124,8 @@ delimiter."
       (jove--read-token state char)))
     state))                             ; Return lexer state vector
 
-;; Just for testing the lexer.
-(defun jove-test ()
+;; TODO Finish. This is function is just for testing at the moment.
+(defun jove-lex ()
   (save-restriction
     (widen)
     (save-excursion
@@ -958,6 +1150,7 @@ delimiter."
                           10000.0)))
           (message "Finished in %0.3fsec Count: %d" time count))
         (setq lexer-cache (vconcat (nreverse list)))
+        (jove--apply-fontifications (point-min) (point-max))
         state))))
 
 (provide 'jove-lexer)
