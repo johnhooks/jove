@@ -541,7 +541,7 @@ Otherwise signal `jove-unexpected-character-error'."
                t))                    ; Found '*/' without '\n'
         (progn
           (goto-char (point-max))
-          (jove--warn (jove--start state) (point-max) "Missing comment closing delimiter")))
+          (jove--warn start (point-max) "Missing comment closing delimiter")))
     (jove--set-face start (point) font-lock-comment-face)
     (run-hook-with-args 'jove-comment-hook start (point))))
 
@@ -674,10 +674,9 @@ Otherwise signal `jove-unexpected-character-error'."
 (defun jove--finish-op (state type size)
   "Finish operator token of TYPE and SIZE."
   ;; Acorn uses `pos' think `jove--start' should work... Seems to
-  (let ((start (jove--start state)))
-    (goto-char (+ (point) size))
-    ;; Do I need to include a string value for operators?
-    (jove--finish-token state type (buffer-substring-no-properties start (+ start size)))))
+  ;; Not including value. If necessary use `buffer-substring-no-properties'
+  (goto-char (+ (point) size))
+  (jove--finish-token state type))
 
 (defun jove--read-token-dot (state)
   "Read a token starting with a period."
@@ -1054,7 +1053,7 @@ delimiter."
         (type jove-NAME))
     (when (and word                     ; If word is nil just highlight it.
                (or (>= jove-ecma-version 6)
-                   (not jove--contains-esc)))
+                   (not (jove--contains-esc state))))
       (setq type (or (gethash (intern word) jove-keywords)
                      jove-NAME)))
     (jove--finish-token state type word)
