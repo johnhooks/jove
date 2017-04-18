@@ -29,18 +29,6 @@
 
 ;;; Variables
 
-(defcustom jove-indent-level 2
-  "Number of spaces for each indentation step in `js-mode'."
-  :type 'integer
-  :safe 'integerp
-  :group 'jove-mode)
-
-(defcustom jove-idle-timer-delay 0.25
-  "Delay in secs before re-parsing after user makes changes."
-  :type 'number
-  :group 'jove-mode)
-(make-variable-buffer-local 'jove-idle-timer-delay)
-
 (defvar jove-mode-syntax-table
   (let ((table (make-syntax-table)))
     (c-populate-syntax-table table)
@@ -50,13 +38,6 @@
     (modify-syntax-entry ?` "\"" table)
     table)
   "Syntax table for `jove-mode'.")
-
-;;; Buffer Local Variables
-
-(defvar-local jove--parsing nil "Private variable.")
-(defvar-local jove--cache-end 0 "Private variable.")
-(defvar-local jove--idle-timer nil "Private variable.")
-(defvar-local jove--buffer-dirty-p nil "Private variable.")
 
 ;;; Idle Reparse Timer Functions
 
@@ -98,6 +79,33 @@ it to be reparsed when the buffer is selected."
               jove--warnings nil)
         (jove-lex))
     (setq jove--idle-timer nil)))
+
+(defun jove-query-pos (vec pos &optional force)
+  "Use binary search to find a token in VEC at POS.
+Return the index of the token if found, otherwise -1. Boolean
+flag FORCE returns the index of next token if one is not found
+under point."
+  (let ((current nil)
+        (guess 0)
+        (min 0)
+        (max (1- (length vec))))
+    (catch 'index
+      (while t
+        (when (< max min)
+          (throw 'index (if force min -1)))
+        (setq guess (/ (+ max min) 2)
+              current (aref vec guess))
+        (cond
+         ((and (<= (jove--start current) pos)
+               (> (jove--end current) pos))
+          ;; found it!
+          (throw 'index guess))
+         ((< (jove--start current) pos)     ; (< 1 9)
+          ;; too low                         ^ location in search
+          (setq min (1+ guess)))
+         ((> (jove--end current) pos)       ; (> 9 1)
+          ;; too high                        ^ location in search
+          (setq max (1- guess))))))))
 
 ;;; Indentation Functions
 

@@ -21,86 +21,36 @@
 
 ;;; Code:
 
-(defgroup jove-mode nil
-  "A JavaScript mode."
-  :group 'languages)
+(require 'jove-vars)
 
-(defcustom jove-ecma-version 6
-  "ECMAScript version used to parse."
-  :type 'number
-  :group 'jove-mode)
+;;; TODO put these some where that makes sense.
+;; They will be used by the lexer and parser.
 
-(defcustom jove-always-strict t
-  "Parse all JavaScript as module code."
-  :type 'boolean
-  :group 'jove-mode)
+(defsubst jove--clear-face (start end)
+  "Remove face properties from START to END."
+  (remove-text-properties start end '(font-lock-face nil)))
 
-(setq jove--strict t)                       ; HACK
-
-(defcustom jove-verbose nil
-  "Print information about parse to *Messages* buffer."
-  :type 'boolean
-  :group 'jove-mode)
-
-(defcustom jove-lexer-ceiling (/ 1.0 45)   ; Changed from 30
-  "Maximum amount of time to chunk the lexer."
-  :type 'number
-  :group 'jove-mode)
-
-(defcustom jove-lexer-timeout (/ 1.0 100)
-  "Amount of time to pause the lexer."
-  :type 'number
-  :group 'jove-mode)
-
-;;; Local Variables
-
-(defvar-local jove--parsing nil "Private variable.")
-(defvar-local jove--fontifications nil "Private variable.")
-
-(defvar-local jove--string-buffer nil
-  "List of chars built up while scanning various tokens.")
-
-(defvar-local jove--warnings '()
-  "A list to hold queued warnings.")
-
-;;; Lexer Hooks
-
-(defvar-local jove-lexer-chunk-hook nil
-  "Hooks called after finishing a chunk.")
-
-(defvar-local jove-lexer-complete-hook nil
-  "Hook called after lexical process is complete.")
-
-(defvar jove-comment-hook nil
-  "Abnormal hook for comments, args start and end.")
-
-;;; TODO put these some where that makes sense...
-
-(defsubst jove--clear-face (beg end)
-  (remove-text-properties beg end '(font-lock-face nil)))
-
-(defun jove--apply-fontifications (start end)
-  "Apply highlighting after lexer completes a chunk."
+(defun jove--apply-fontifications (start end &optional no-clear)
+  "Apply fontifications between START and END.
+Boolean flag NO-CLEAR will prevent clearing faces before application."
   (with-silent-modifications
-    (jove--clear-face start end)
-    (seq-do #'(lambda (f) (put-text-property (aref f 0) (aref f 1) 'font-lock-face (aref f 2)))
-            jove--fontifications)
-    (seq-do #'(lambda (f) (put-text-property (aref f 0) (aref f 1) 'font-lock-face font-lock-warning-face))
+    (unless no-clear (jove--clear-face start end))
+    (mapc #'(lambda (f)
+              (put-text-property (aref f 0) (aref f 1) 'font-lock-face (aref f 2)))
+          (nreverse jove--fontifications))  ; Allows applying over those previously pushed.
+    (mapc #'(lambda (f)
+              (put-text-property (aref f 0) (aref f 1) 'font-lock-face font-lock-warning-face))
             jove--warnings)
-    ;; (dolist (f jove--fontifications)
-    ;;   (put-text-property (aref f 0) (aref f 1) 'font-lock-face (aref f 2)))
-    ;; (dolist (f jove--warnings)
-    ;;   (put-text-property (aref f 0) (aref f 1) 'font-lock-face font-lock-warning-face))
     (setq jove--fontifications nil
           jove--warnings nil)))     ; Probably shouldn't reset here.
 
-(defun jove--set-face (beg end face)
-  "Fontify a region.  If RECORD is non-nil, record for later."
-  (setq beg (min (point-max) beg)
-        beg (max (point-min) beg)
+(defun jove--set-face (start end face)
+  "Flag region between START and END for fontification using FACE."
+  (setq start (min (point-max) start)
+        start (max (point-min) start)
         end (min (point-max) end)
         end (max (point-min) end))
-  (push (vector beg end face) jove--fontifications))
+  (push (vector start end face) jove--fontifications))
 
 ;;; Errors
 
@@ -152,30 +102,42 @@
           binop))                       ; 8
 
 (defsubst jove--tt-label (tt)
+  "Return the 'label' slot of the token type TT."
   (aref tt 0))
 (defsubst jove--tt-keyword (tt)
+  "Return the 'keyword' slot of the token type TT."
   (aref tt 1))
 (defsubst jove--tt-before-expr (tt)
+  "Return the 'before-expr' slot of the token type TT."
   (aref tt 2))
 (defsubst jove--tt-starts-expr (tt)
+  "Return the 'starts-expr' slot of the token type TT."
   (aref tt 3))
 (defsubst jove--tt-is-loop (tt)
+  "Return the 'is-loop' slot of the token type TT."
   (aref tt 4))
 (defsubst jove--tt-is-assign (tt)
+  "Return the 'is-assign' slot of the token type TT."
   (aref tt 5))
-(defsubst jove--tt-is-prefix (tt)
+(defsubst jove--tt-prefix (tt)
+  "Return the 'prefix' slot of the token type TT."
   (aref tt 6))
-(defsubst jove--tt-is-postfix (tt)
+(defsubst jove--tt-postfix (tt)
+  "Return the 'postfix' slot of the token type TT."
   (aref tt 7))
 (defsubst jove--tt-binop (tt)
+  "Return the 'binop' slot of the token type TT."
   (aref tt 8))
 
 (defun jove--binop-create (label prec)
-  "Return a vector representing a binary operator token type."
+  "Return a vector representing a binary operator token type.
+LABEL should be a string and PREC a number for operator precedence."
   (jove--tt-create label :before-expr t :binop prec))
 
 (defmacro jove--keyword-create (label &rest options)
-  "Return a vector representing a keyword token type."
+  "Return a vector representing a keyword token type.
+LABEL should be a string and the remaining arguments are key value
+pairs collected in OPTIONS."
   `(puthash (intern ,label)
             (jove--tt-create ,label :keyword t ,@options)
             jove-keywords))
@@ -294,12 +256,16 @@
           override))                    ; 3
 
 (defsubst jove--ctx-token (ctx)
+  "Return the 'token' slot of the context type CTX."
   (aref ctx 0))
 (defsubst jove--ctx-is-expr (ctx)
+  "Return the 'is-expr' slot of the context type CTX."
   (aref ctx 1))
 (defsubst jove--ctx-preserve-space (ctx)
+  "Return the 'preserve-space' slot of the context type CTX."
   (aref ctx 2))
 (defsubst jove--ctx-override (ctx)
+  "Return the 'override' slot of the context type CTX."
   (aref ctx 3))
 
 (defvar jove-B-STAT (jove--ctx-create "{"))
@@ -332,45 +298,65 @@
           1                             ; 1 end
           jove-EOF                          ; 2 type
           nil                           ; 3 value
-          (jove--initial-ctx)               ; 4 ctx-stack
-          t                             ; 5 expr-allowed
-          nil                           ; 6 newline-before
+          nil                           ; 4 newline-before
+          (jove--initial-ctx)               ; 5 ctx-stack
+          t                             ; 6 expr-allowed
           nil))                         ; 7 contains-esc
 
+;; Think I might switch newline-before to index 4, then returning
+;; a token from the lexer with all the necessary information is as
+;; easy as (seq-take state 5).
+
 (defun jove--lex-p (state)
-  "Predicate returns t if STATE is a lexer state."
+  "Return non-nil if STATE is a vector representing lexer state."
   ;; value can be anything
   (and (vectorp state)
        (= (length state) 8)
        (numberp (aref state 0))
        (numberp (aref state 1))
        (vectorp (aref state 2))
-       (listp (aref state 4))
-       (booleanp (aref state 5))
+       ;; value not tested
+       (booleanp (aref state 4))
+       (listp (aref state 5))
        (booleanp (aref state 6))
        (booleanp (aref state 7))))
 
 ;; Use `vconcat' to copy previous state.
 
 (defsubst jove--start (state)
+  "Return the 'start' slot of the lexer STATE."
   (aref state 0))
 (defsubst jove--set-start (state value)
+  "Set the 'start' slot of the lexer STATE to VALUE."
   (aset state 0 value))
 
 (defsubst jove--end (state)
+  "Return the 'end' slot of the lexer STATE."
   (aref state 1))
 (defsubst jove--set-end (state value)
+  "Set the 'end' slot of the lexer STATE to VALUE."
   (aset state 1 value))
 
 (defsubst jove--type (state)
+  "Return the 'type' slot of the lexer STATE."
   (aref state 2))
 (defsubst jove--set-type (state value)
+  "Set the 'type' slot of the lexer STATE to VALUE."
   (aset state 2 value))
 
 (defsubst jove--value (state)
+  "Return the 'value' slot of the lexer STATE."
   (aref state 3))
 (defsubst jove--set-value (state value)
+  "Set the 'value' slot of the lexer STATE to VALUE."
   (aset state 3 value))
+
+(defsubst jove--newline-before (state)
+  "Return the 'newline-before' slot of the lexer STATE."
+  (aref state 4))
+(defsubst jove--set-newline-before (state value)
+  "Set the 'newline-before' slot of the lexer STATE to VALUE."
+  (aset state 4 value))
 
 ;; Quoted acorn/src/state.js
 ;;
@@ -379,27 +365,29 @@
 ;;    given position."
 
 (defsubst jove--ctx-stack (state)
-  (aref state 4))
+  "Return the 'ctx-stack' slot of the lexer STATE."
+  (aref state 5))
 (defsubst jove--ctx-stack-push (state value)
-  (aset state 4 (cons value (aref state 4))))
+  "Push on top of the 'ctx-stack' of the lexer STATE a VALUE."
+  (aset state 5 (cons value (aref state 5))))
 (defsubst jove--ctx-stack-pop (state)
+  "Pop the 'ctx-stack' of the lexer STATE."
   (prog1
-      (car (aref state 4))
-    (aset state 4 (cdr (aref state 4)))))
+      (car (aref state 5))
+    (aset state 5 (cdr (aref state 5)))))
 
 (defsubst jove--expr-allowed (state)
-  (aref state 5))
-(defsubst jove--set-expr-allowed (state value)
-  (aset state 5 value))
-
-(defsubst jove--newline-before (state)
+  "Return the 'expr-allowed' slot of the lexer STATE."
   (aref state 6))
-(defsubst jove--set-newline-before (state value)
+(defsubst jove--set-expr-allowed (state value)
+  "Set the 'expr-allowed' slot of the lexer STATE to VALUE."
   (aset state 6 value))
 
 (defsubst jove--contains-esc (state)
+  "Return the 'contains-esc' slot of the lexer STATE."
   (aref state 7))
 (defsubst jove--set-contains-esc (state value)
+  "Set the 'contains-esc' slot of the lexer STATE to VALUE."
   (aset state 7 value))
 
 ;;; Token
@@ -407,35 +395,36 @@
 ;; I don't know if token will be necessary because all the relevent information
 ;; is contained in the lexer state.
 
-(defun jove--token-create (start end type &optional value)
-  "Return a vector representing a token."
-  (vector start                         ; 0
-          end                           ; 1
-          type                          ; 2
-          value))                       ; 3
+;; (defun jove--token-create (start end type &optional value)
+;;   "Return a vector representing a token."
+;;   (vector start                         ; 0
+;;           end                           ; 1
+;;           type                          ; 2
+;;           value))                       ; 3
 
-(defun jove--token-p (object)
-  "Return non-nil if OBJECT could represent a token."
-  ;; value can be anything
-  (and (vectorp object)
-       (= 3 (length object))
-       (numberp (aref object 0))
-       (numberp (aref object 1))
-       (vectorp (aref object 2))))
+;; (defun jove--token-p (object)
+;;   "Return non-nil if OBJECT could represent a token."
+;;   ;; value can be anything
+;;   (and (vectorp object)
+;;        (= 3 (length object))
+;;        (numberp (aref object 0))
+;;        (numberp (aref object 1))
+;;        (vectorp (aref object 2))))
 
-(defsubst jove--token-start (token)
-  (aref token 0))
-(defsubst jove--token-end (token)
-  (aref token 1))
-(defsubst jove--token-type (token)
-  (aref token 2))
-(defsubst jove--token-value (token)
-  (aref token 3))
+;; (defsubst jove--token-start (token)
+;;   (aref token 0))
+;; (defsubst jove--token-end (token)
+;;   (aref token 1))
+;; (defsubst jove--token-type (token)
+;;   (aref token 2))
+;; (defsubst jove--token-value (token)
+;;   (aref token 3))
 
 ;;; Utility Functions
 
 (defun jove--warn (start end message)
-  "Queue a MESSAGE into `jove--warnings'."
+  "Queue a warning from START to END with MESSAGE.
+Push the warning into the list `jove--warnings'."
   (push (vector start end message) jove--warnings)
   nil)                                  ; Return nil
 
@@ -879,7 +868,7 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
              (jove--warn start (point) "Invalid hexadecimal escape")))
           ((<= ?0 char ?7)
            (jove--eat-re "[0-7]\\{1,3\\}")
-           (when (or jove--strict
+           (when (or jove-strict
                      in-template)
              (jove--warn start (point) "Octal in template string")))
           (t                            ; Any other escape
@@ -1061,7 +1050,7 @@ delimiter."
       (jove--set-face (jove--start state) (point) font-lock-keyword-face))))
 
 (defun jove--read-token (state char)
-  "Read token from CHAR."
+  "Read token using STATE with supplied CHAR."
   ;; Implements getTokenFromCode from acorn.
   (cond
    ((eq ?\. char) (jove--read-token-dot state))
@@ -1076,8 +1065,7 @@ delimiter."
    ((eq ?? char) (jove--finish-punc state jove-QUESTION))
    ((eq ?: char) (jove--finish-punc state jove-COLON))
    ((and (eq ?\` char) (<= 6 jove-ecma-version))
-    (jove--finish-punc state jove-BACKQUOTE)
-    (run-hooks 'jove-template-hook))
+    (jove--finish-punc state jove-BACKQUOTE))
    ((eq ?0 char) (jove--read-zero state))
    ((<= ?1 char ?9)  (jove--read-number state nil))
    ((or (eq ?\' char) (eq ?\" char)) (jove--read-string state char))
@@ -1123,15 +1111,18 @@ delimiter."
       (jove--read-token state char)))
     state))                             ; Return lexer state vector
 
-;; TODO Finish. This is function is just for testing at the moment.
-(defun jove-lex ()
+(defun jove--loop-lexer (state)
+  "Loop the lexer using the vector STATE as the lexer state object.
+Tokens are collected into the vector `jove--lexer-cache'."
+  ;; Eventually the lexer will be chunked to prevent interrupting the
+  ;; command loop.
   (save-restriction
     (widen)
     (save-excursion
-      (goto-char 1)
+      (goto-char (jove--end state))
       (let ((count 0)
             (looping t)
-            (state (jove--lex-create))
+            (start-pos (point))
             (start-time (float-time))
             (list '()))
         (save-match-data
@@ -1144,13 +1135,18 @@ delimiter."
               (setq state (jove--next state)
                     count (1+ count))
               (push state list))))
-        (let ((time (/ (truncate (* (- (float-time) start-time)
-                                       10000))
-                          10000.0)))
-          (message "Finished in %0.3fsec Count: %d" time count))
-        (setq lexer-cache (vconcat (nreverse list)))
-        (jove--apply-fontifications (point-min) (point-max))
+        (when jove-verbose
+          (let ((time (/ (truncate (* (- (float-time) start-time)
+                                      10000))
+                         10000.0)))
+            (message "Finished in %0.3fsec Count: %d" time count)))
+        (setq jove--cache (vconcat (nreverse list)))
+        (jove--apply-fontifications start-pos (point))
         state))))
+
+(defun jove-lex ()
+  "Run the lexer over the entire buffer."
+  (jove--loop-lexer (jove--lex-create)))
 
 (provide 'jove-lexer)
 
