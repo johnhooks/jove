@@ -664,8 +664,12 @@ Otherwise signal `jove-unexpected-character-error'."
   "Finish operator token of TYPE and SIZE."
   ;; Acorn uses `pos' think `jove--start' should work... Seems to
   ;; Not including value. If necessary use `buffer-substring-no-properties'
-  (goto-char (+ (point) size))
-  (jove--finish-token state type))
+  (let ((end (+ (point) size)))
+    (goto-char end)
+    (jove--finish-token state
+                    type
+                    (buffer-substring-no-properties (jove--start state)
+                                                    end))))
 
 (defun jove--read-token-dot (state)
   "Read a token starting with a period."
@@ -952,21 +956,21 @@ delimiter."
               (progn
                 (forward-char)
                 (jove--finish-token state jove-BACKQUOTE)
-                (jove--set-face (jove--start state) (point) font-lock-string-face)
+                (jove--set-face (jove--start state) (jove--end state) font-lock-string-face)
                 (throw 'token nil))
             (jove--finish-token state jove-TEMPLATE)
-            (jove--set-face (jove--start state) (point) font-lock-string-face)
+            (jove--set-face (jove--start state) (jove--end state) font-lock-string-face)
             (throw 'token nil)))
          ((eq ?\$ char)
           (if (eq ?\{ (jove--peek))
-              (if (and (= (jove--start state) (point))
+              (if (and (= (jove--start state) (jove--end state))
                        (eq jove-TEMPLATE (jove--type state)))
                   (progn
                     (forward-char 2)
                     (jove--finish-token state jove-DOLLAR-BRACE-L)
                     (throw 'token nil))
                 (jove--finish-token state jove-TEMPLATE)
-                (jove--set-face (jove--start state) (point) font-lock-string-face)
+                (jove--set-face (jove--start state) (jove--end state) font-lock-string-face)
                 (throw 'token nil))
             ;; Its possible to catch a single '$' which is part of the
             ;; literal template string. So it is necessary to always
@@ -1065,7 +1069,8 @@ delimiter."
    ((eq ?? char) (jove--finish-punc state jove-QUESTION))
    ((eq ?: char) (jove--finish-punc state jove-COLON))
    ((and (eq ?\` char) (<= 6 jove-ecma-version))
-    (jove--finish-punc state jove-BACKQUOTE))
+    (jove--finish-punc state jove-BACKQUOTE)
+    (jove--set-face (jove--start state) (jove--end state) font-lock-string-face))
    ((eq ?0 char) (jove--read-zero state))
    ((<= ?1 char ?9)  (jove--read-number state nil))
    ((or (eq ?\' char) (eq ?\" char)) (jove--read-string state char))

@@ -1,15 +1,16 @@
-#+TITLE:  An Emacs JavaScript Editing Mode
+#+TITLE:  By Jove! Another JavaScript Editing Mode?
 #+AUTHOR: John Hooks
-#+EMAIL:  john@bitmachina.com
-#+DATE: <2017-04-13 Thu>
+#+EMAIL: john@bitmachina.com
+#+DATE: <2017-04-19 Wed>
 #+STARTUP: indent
 #+STARTUP: hidestars
 
 ** About
-This project is an attempt to create a new JavaScript editing mode for Emacs. 
+This project is an attempt to create a new JavaScript editing mode for
+Emacs.
 
-Jove includes a striped down port of the [[https://github.com/ternjs/acorn][Acorn]] parser in order to provide
-complex highlighting and indentation functionality.
+Jove includes a striped down port of the [[https://github.com/ternjs/acorn][Acorn]] parser in order to
+provide complex highlighting and indentation functionality.
 
 *** Inspiration
 - [[https://github.com/marijnh/parse-js][parse-js]] written in Common Lisp by Marijn Haverbeke
@@ -22,24 +23,13 @@ complex highlighting and indentation functionality.
 - [[http://marijnhaverbeke.nl/blog/acorn.html][Acorn: yet another JavaScript parser]]
 - [[http://lisperator.net/pltut/][How to implement a programming language in JavaScript]]
 ** Installation
-Probably shouldn't not do that now...
-
-The lexer is the only functional component at the moment.
-
-** Goals
-1. Provide proper indentation of
-   - arrow functions (in the works)
-   - conditional expressions (in the works)
-2. Provide proper highlighting of
-   - template strings
-   - regular expressions
-3. Provide functionality for JSX (a ways off)
+Probably shouldn't not do that quite yet... though getting close!
 
 ** Reasoning
 Shear madness.
 
 After getting frustrated during an attempt to modify the indentation
-functionality of ~js.el~, I concluded a simple syntax parser would
+functionality of ~js.el~, I concluded a /simple*/ syntax parser would
 provide a more complete understanding of the code for editing
 purposes. Plus I needed something to do in my spare time.
 
@@ -48,6 +38,6 @@ Most functions of the lexer are complete and are tested. I have been
 performing informal tests of the lexer with [[http://underscorejs.org/][Underscore.js]] and it seems
 to be tokenizing everything correctly.
 
-Soon work on the parser will begin. I am currently studying the
-JavaScript mode of [[https://github.com/codemirror/CodeMirror/blob/master/mode/javascript/javascript.js][CodeMirror]]. The intent of its parser is the
-exact same as my own, provide syntax highlighting and indentation.
+Work on the parser has begun. The expression parsing functions are
+written, though I have not started on the tests yet.
+
