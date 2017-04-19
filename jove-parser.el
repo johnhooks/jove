@@ -402,7 +402,7 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
                (eq jove-PAREN-L (jove--type jove--token)))
           (let ((exprs (jove--node-create)))
             (jove-next)                     ; Move over '('
-            (jove--node-add-children* exprs (jove--parse-expr-list jove-PAREN-R))
+            (jove--node-add-children* exprs (nreverse (jove--parse-expr-list jove-PAREN-R)))
             (jove--set-node-end exprs (jove--end jove--prev-token))
             ;; 'exprs' is not finished like most nodes.  It is almost
             ;; complete, only the type slot remains to be set.
@@ -850,7 +850,8 @@ Updates node type, does not perform check for valid lvalues."
       ;; First child is 'left' operand.
       (jove--to-assignable (jove--node-first-child node)))
      ((eq 'parenthesized-expression type)
-      (jove--to-assignable (jove--node-first-child node))))))
+      (jove--to-assignable (jove--node-first-child node)))))
+  node)                                 ; Return the node.
 
 (defun jove--parse-spread ()
   "Parse spread element."
