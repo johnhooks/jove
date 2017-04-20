@@ -58,6 +58,16 @@
   :type 'number
   :group 'jove-mode)
 
+;;; Errors
+
+(define-error 'jove-error "A jove error")
+
+(define-error 'jove-unexpected-character-error
+  "Unexpected character" 'jove-error)
+
+(define-error 'jove-parse-error
+  "Jove parser errror" 'jove-error)
+
 ;;; Buffer Local Variables
 
 (defvar-local jove--parsing nil "Private variable.")

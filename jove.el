@@ -22,6 +22,7 @@
 ;;; Code:
 
 (require 'jove-lexer)
+(require 'jove-parser)
 
 (defgroup jove-mode nil
   "A JavaScript mode."
@@ -96,14 +97,14 @@ under point."
         (setq guess (/ (+ max min) 2)
               current (aref vec guess))
         (cond
-         ((and (<= (jove--start current) pos)
-               (> (jove--end current) pos))
+         ((and (<= (jove-start current) pos)
+               (> (jove-end current) pos))
           ;; found it!
           (throw 'index guess))
-         ((< (jove--start current) pos)     ; (< 1 9)
+         ((< (jove-start current) pos)     ; (< 1 9)
           ;; too low                         ^ location in search
           (setq min (1+ guess)))
-         ((> (jove--end current) pos)       ; (> 9 1)
+         ((> (jove-end current) pos)       ; (> 9 1)
           ;; too high                        ^ location in search
           (setq max (1- guess))))))))
 
@@ -161,7 +162,7 @@ Buffer edit spans from BEG to END and is of length LEN."
 
 ;;; The Mode
 
-(define-derived-mode jove-mode prog-mode "JavaScript"
+(define-derived-mode jove-mode prog-mode "\u26A1JS\u26A1"
   "A JavaScript editing mode."
   :group 'jove-mode
 
