@@ -162,7 +162,7 @@ Buffer edit spans from BEG to END and is of length LEN."
 
 ;;; The Mode
 
-(define-derived-mode jove-mode prog-mode "\u26A1JS\u26A1"
+(define-derived-mode jove-mode prog-mode "\u26A1JS"
   "A JavaScript editing mode."
   :group 'jove-mode
 

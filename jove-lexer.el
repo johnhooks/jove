@@ -289,7 +289,7 @@ pairs collected in OPTIONS."
           jove-EOF                          ; 2 token type (tt)
           nil                           ; 3 value
           nil                           ; 4 newline-before
-          (jove-initial-ctx)               ; 5 ctx-stack
+          (jove-initial-ctx)                ; 5 ctx-stack
           t                             ; 6 expr-allowed
           nil))                         ; 7 contains-esc
 
@@ -379,36 +379,6 @@ pairs collected in OPTIONS."
 (defsubst jove-set-contains-esc (state value)
   "Set the 'contains-esc' slot of the lexer STATE to VALUE."
   (aset state 7 value))
-
-;;; Token
-
-;; I don't know if token will be necessary because all the relevent information
-;; is contained in the lexer state.
-
-;; (defun jove-token-create (start end type &optional value)
-;;   "Return a vector representing a token."
-;;   (vector start                         ; 0
-;;           end                           ; 1
-;;           type                          ; 2
-;;           value))                       ; 3
-
-;; (defun jove-token-p (object)
-;;   "Return non-nil if OBJECT could represent a token."
-;;   ;; value can be anything
-;;   (and (vectorp object)
-;;        (= 3 (length object))
-;;        (numberp (aref object 0))
-;;        (numberp (aref object 1))
-;;        (vectorp (aref object 2))))
-
-;; (defsubst jove-token-start (token)
-;;   (aref token 0))
-;; (defsubst jove-token-end (token)
-;;   (aref token 1))
-;; (defsubst jove-token-type (token)
-;;   (aref token 2))
-;; (defsubst jove-token-value (token)
-;;   (aref token 3))
 
 ;;; Utility Functions
 
@@ -887,9 +857,9 @@ Criteria include ending delimiter and flags."
        ((eq ?\/ char)
         (forward-char)
         (unless in-class (setq looking nil)))
-       ((and (not in-class) (eq ?\[ char))
+       ((eq ?\[ char)
         (forward-char)
-        (setq in-class t))              ; Enter character class
+        (unless in-class (setq in-class t))) ; Enter character class
        ((and in-class (eq ?\] char))
         (forward-char)
         (setq in-class nil))            ; Exit character class

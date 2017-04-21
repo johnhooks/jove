@@ -36,7 +36,7 @@
 
 ;;; Initialization
 
-(defun jove-parser-config ()
+(defun jove-config ()
   "Initialize parser global variables."
   (setq jove--index 0
         jove--length (length jove--cache)
@@ -181,33 +181,44 @@ Optionally add INFO into the info slot."
 
 ;;; Utility Functions
 
+(cl-defun jove-error (message &key start end type)
+  "Signal an error including a MESSAGE.
+If START or END not supplied, data from the current token is
+used.  The error start and end locations are added to the
+message.  Unless error TYPE is supplied throw a
+`jove-parse-error'."
+  (let ((start (or start (jove-start jove--token)))
+        (end (or end (jove-end jove--token))))
+    (signal (or type 'jove-parse-error)
+            (list (format "[%d,%d] Parse error: %s" start end message) start end))))
+
 (defun jove-unexpected ()
   "Signal an unexpected token parse error."
-  (signal 'jove-parse-error
-          `((start ,(jove-start jove--token))
-            (end ,(jove-end jove--token))
-            (message ,(format "Unexpected token: %s"
-                              (jove-tt-label (jove-tt jove--token)))))))
+  (jove-error (format "unexpected token: %s" (jove-tt-label (jove-tt jove--token)))))
 
-(defsubst jove-is (type)
+(defsubst jove-is (tt)
   "Return non-nil if current token is of TYPE."
-  (eq type (jove-tt jove--token)))
+  (eq tt (jove-tt jove--token)))
 
-(defsubst jove-is-not (type)
-  (not (eq type (jove-tt jove--token))))
+(defsubst jove-is-not (tt)
+  (not (eq tt (jove-tt jove--token))))
 
-(defun jove-eat (type)
+(defun jove-eat (tt)
   "Test whether the next token is of TYPE, if so consume it as a side effect.
 Returns t if a token was consumed, otherwise nil."
-  (when (eq type (jove-tt jove--token))
+  (when (eq tt (jove-tt jove--token))
     (jove-next)
     t))
 
-(defun jove-expect (type)
+(defun jove-expect (tt)
   "Test whether current token is of TYPE, consumed it, otherwise error."
-  (if (eq type (jove-tt jove--token))
+  (if (eq tt (jove-tt jove--token))
       (jove-next)
-    (jove-unexpected)))
+    (jove-error (format "expected '%s' found '%s'"
+                    (jove-tt-label tt)
+                    (if (jove-is jove-NAME)
+                        (jove-value jove--token)
+                      (jove-tt-label (jove-tt jove--token)))))))
 
 (defun jove-after-trailing-comma-p (type &optional not-next)
   "Return non-nil if the current token is of TYPE.
@@ -965,15 +976,18 @@ operand."
 (defun jove-parse-top-level (node)
   "Parse a program."
   (let ((body '())
+        (incomplete nil)
         (start-time (float-time)))
     (condition-case err
         (while (jove-is-not jove-EOF)
           (push (jove-parse-statement t t) body))
       (jove-parse-error
-       (message "%s" (error-message-string err))))
+       (setq incomplete t)
+       (when jove-verbose (message "%s" (cadr err)))))
     (jove-add-children* node (nreverse body))
     (jove-next)
-    (when jove-verbose
+    (when (and jove-verbose
+               (not incomplete))
       (let ((time (/ (truncate (* (- (float-time) start-time)
                                   10000))
                      10000.0)))
