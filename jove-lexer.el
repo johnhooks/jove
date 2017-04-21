@@ -273,7 +273,7 @@ pairs collected in OPTIONS."
 (defvar jove-decimal-re "[0-9]+")
 (defvar jove-hexadecimal-re "[0-9A-Fa-f]+")
 
-;;; Lexer Token State
+;;; Lexer State
 
 ;; Use `point' to track the current position of the lexer in the buffer.
 ;; The logic behind using `point', is the relative ease of use to apply
@@ -1048,12 +1048,13 @@ delimiter."
     (forward-char)
     (jove-next-token state))))
 
-(defun jove-next-token (prev-state)
+(defun jove-next-token (state)
   "Transition from PREV-STATE, read next token and return new state."
   ;; Load current token into parser state.
   (let ((char nil)
-        (ctx (jove-current-ctx prev-state))
-        (state (vconcat prev-state)))
+        (ctx (jove-current-ctx state))
+        ;; (state (vconcat prev-state))
+        )
     (when (or (not ctx)
               (not (jove-ctx-preserve-space ctx)))
       (jove-set-newline-before state nil)
@@ -1075,43 +1076,6 @@ delimiter."
      (t
       (jove-read-token state char)))
     state))                             ; Return lexer state vector
-
-(defun jove-loop-lexer (state)
-  "Loop the lexer using the vector STATE as the lexer state object.
-Tokens are collected into the vector `jove-lexer-cache'."
-  ;; Eventually the lexer will be chunked to prevent interrupting the
-  ;; command loop.
-  (save-restriction
-    (widen)
-    (save-excursion
-      (goto-char (jove-end state))
-      (let ((count 0)
-            (looping t)
-            (start-pos (point))
-            (start-time (float-time))
-            (list '()))
-        (save-match-data
-          (setq state (jove-next-token state))
-          (push state list)
-          (while looping
-            (if (eq jove-EOF (jove-tt state))
-                (setq looping nil
-                      count (1+ count))
-              (setq state (jove-next-token state)
-                    count (1+ count))
-              (push state list))))
-        (when jove-verbose
-          (let ((time (/ (truncate (* (- (float-time) start-time)
-                                      10000))
-                         10000.0)))
-            (message "Tokenization finished in %0.3fsec Count: %d" time count)))
-        (setq jove--cache (vconcat (nreverse list)))
-        (jove-apply-fontifications start-pos (point))
-        state))))
-
-(defun jove-lex ()
-  "Run the lexer over the entire buffer."
-  (jove-loop-lexer (jove-lex-state-make)))
 
 (provide 'jove-lexer)
 

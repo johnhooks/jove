@@ -48,16 +48,6 @@
   :group 'jove-mode)
 (make-variable-buffer-local 'jove-idle-timer-delay)
 
-(defcustom jove-lexer-ceiling (/ 1.0 45)   ; Changed from 30
-  "Maximum amount of time to chunk the lexer."
-  :type 'number
-  :group 'jove-mode)
-
-(defcustom jove-lexer-timeout (/ 1.0 100)
-  "Amount of time to pause the lexer."
-  :type 'number
-  :group 'jove-mode)
-
 ;;; Errors
 
 (define-error 'jove-error "A jove error")
@@ -70,36 +60,41 @@
 
 ;;; Buffer Local Variables
 
-(defvar-local jove--parsing nil "Private variable.")
+(defvar-local jove-ast nil
+  "Parsed abstract syntax tree.")
+
+(defvar-local jove--state nil
+  "The parser state.
+Private variable.")
+
+(defvar-local jove--parsing nil
+  "Private variable.")
 
 (defvar-local jove--fontifications nil
-  "List of deferred fontifications.")
+  "List of deferred fontifications.
+Private variable.")
 
 (defvar-local jove--buffer-dirty-p nil
-  "Boolean representing whether the buffer requires reparsing.")
+  "Boolean representing whether the buffer requires reparsing.
+Private variable.")
 
 (defvar-local jove--cache-end 0
-  "Number representing the position of the last buffer modification.")
-
-(defvar-local jove--cache '()
-  "Vector of cached lexer states.")
+  "Number representing the position of the last buffer modification.
+Private variable.")
 
 (defvar-local jove--idle-timer nil
-  "Timer used for idle reparseing.")
+  "Timer used for idle reparseing.
+Private variable.")
 
 (defvar-local jove--string-buffer nil
-  "List of chars built up while scanning various tokens.")
+  "List of chars built up while scanning various tokens.
+Private variable.")
 
 (defvar-local jove--warnings '()
-  "A list to hold queued warnings.")
+  "A list to hold queued warnings.
+Private variable.")
 
 ;;; Lexer Hooks
-
-(defvar-local jove-lexer-chunk-hook nil
-  "Hooks called after finishing a chunk.")
-
-(defvar-local jove-lexer-complete-hook nil
-  "Hook called after lexical process is complete.")
 
 (defvar jove-comment-hook nil
   "Abnormal hook for comments, args start and end.")

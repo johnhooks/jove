@@ -78,7 +78,7 @@ it to be reparsed when the buffer is selected."
         (setq jove--buffer-dirty-p nil
               jove--fontifications nil
               jove--warnings nil)
-        (jove-lex))
+        (jove-parse))
     (setq jove--idle-timer nil)))
 
 (defun jove-query-pos (vec pos &optional force)

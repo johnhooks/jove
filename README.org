@@ -1,7 +1,7 @@
-#+TITLE:  By Jove! Another JavaScript Editing Mode?
+#+TITLE:  By Jove! Yet Another JavaScript Editing Mode
 #+AUTHOR: John Hooks
 #+EMAIL: john@bitmachina.com
-#+DATE: <2017-04-19 Wed>
+#+DATE: <2017-04-21 Fri>
 #+STARTUP: indent
 #+STARTUP: hidestars
 
@@ -19,25 +19,26 @@ provide complex highlighting and indentation functionality.
 - [[https://github.com/mishoo/UglifyJS2][UglifyJS]]
 - [[https://github.com/mooz/js2-mode][js2-mode]]
 *** Reading on JavaScript Parsers
-- [[http://codemirror.net/1/story.html][Implementing a Syntax-Highlighting JavaScript Editor—In JavaScript]]
+- [[http://codemirror.net/1/story.html][Implementing a Syntax-Highlighting JavaScript Editor—In JavaScript]] 
+  By Marijn Haverbeke
 - [[http://marijnhaverbeke.nl/blog/acorn.html][Acorn: yet another JavaScript parser]]
+  By Marijn Haverbeke
 - [[http://lisperator.net/pltut/][How to implement a programming language in JavaScript]]
+  By Mihai Bazon
+
 ** Installation
-Probably shouldn't not do that quite yet... though getting close!
+Probably shouldn't not do that quite yet... getting close though!
 
 ** Reasoning
 Shear madness.
 
-After getting frustrated during an attempt to modify the indentation
-functionality of ~js.el~, I concluded a /simple*/ syntax parser would
-provide a more complete understanding of the code for editing
+After getting frustrated in an attempt to modify the indentation code
+of ~js.el~, I concluded a /*simple*/ (ha, ha, ha...)  syntax parser
+would provide a more complete understanding of the code for editing
 purposes. Plus I needed something to do in my spare time.
 
 ** Working
-Most functions of the lexer are complete and are tested. I have been
-performing informal tests of the lexer with [[http://underscorejs.org/][Underscore.js]] and it seems
-to be tokenizing everything correctly.
-
-Work on the parser has begun. The expression parsing functions are
-written, though I have not started on the tests yet.
-
+The functions of the lexer are complete and tested. The parser
+functions are mostly complete and untested. I have been performing
+informal tests of the parser with [[http://underscorejs.org/][Underscore]] and [[http://jquery.com][JQuery]], it seems to
+be parsing everything correctly.
