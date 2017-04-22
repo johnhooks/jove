@@ -48,7 +48,7 @@ If LEX-STATE not provided create an initial lexer state."
   "Return the 'prev-token' slot of the parser state."
   (aref jove--state 1))
 (defsubst jove-set-prev-token (lex-state)
-  "Set the 'prev-token' slot of the parser state to LEX-state."
+  "Set the 'prev-token' slot of the parser state to LEX-STATE."
   (aset jove--state 1 lex-state))
 
 (defsubst jove-in-function ()
@@ -100,11 +100,11 @@ If STATE not supplied create an initial state."
 Return a copy of the updated LEX-STATE."
   (save-excursion
     ;; Use `vconcat' to make a copy of LEX-STATE.
-    (setq lex-state (jove-next-token (vconcat (jove-token))))
-    (when (numberp count)
-      (while (< 0 (setq count (1- count)))
-        (setq lex-state (jove-next-token lex-state))))
-    lex-state))
+    (let ((lex-state (jove-next-token (vconcat (jove-token)))))
+      (when (numberp count)
+        (while (< 0 (setq count (1- count)))
+          (setq lex-state (jove-next-token lex-state))))
+      lex-state)))
 
 ;;; Nodes
 
@@ -471,11 +471,17 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
                                  (if computed
                                      (jove-parse-expression)
                                    (jove-parse-identifier t)))
-            (when computed (jove-expect jove-BRACKET-R))
+            (if computed
+                (jove-expect jove-BRACKET-R)
+              (let ((token (jove-prev-token)))
+                (jove-set-face (jove-start token) (jove-end token) 'js2-object-property)))
             (setq base (jove-node-finish node 'member-expression))))
          ;; Call Expression
          ((and (not no-calls)
                (eq jove-PAREN-L (jove-tt (jove-token))))
+          (let ((token (jove-prev-token)))
+            (when (eq jove-NAME (jove-tt token))
+            (jove-set-face (jove-start token) (jove-end token) 'js2-function-call)))
           (let ((exprs (jove-node-init)))
             (jove-next)                     ; Move over '('
             (jove-add-children* exprs (jove-parse-expr-list jove-PAREN-R))
@@ -625,6 +631,7 @@ are allowed."
              (not (jove-can-insert-semicolon-p))
              (eq jove-ARROW (jove-tt (jove-token))))
         (let ((params (jove-node-init start-pos)))
+          (mapc #'jove-to-assignable expr-list)
           (jove-add-children* params (nreverse expr-list))
           (jove-node-finish params 'parameters)
           (jove-next)                         ; Move over '=>'
@@ -741,7 +748,9 @@ of the property."
              (eq jove-COLON (jove-tt (jove-token))))
     (jove-unexpected))
   (cond
-   ((jove-eat jove-COLON)
+   ((jove-is jove-COLON)
+    (jove-set-face (jove-start (jove-prev-token)) (jove-end (jove-prev-token)) 'js2-object-property)
+    (jove-next)                             ; Move over ':'
     (jove-add-child prop (if is-pattern
                                (jove-parse-maybe-default start-pos)
                              (jove-parse-maybe-assign))))
@@ -778,9 +787,11 @@ of the property."
    (t
     (jove-unexpected))))
 
-(defun jove-parse-property-name (prop is-pattern)
+(defun jove-parse-property-name (prop &optional is-pattern)
   "Parse object property name.
-Add as a child to the node PROP."
+Add the parsed node to the node PROP.  The boolean IS-PATTERN
+flags whether parsing an object pattern.  Add as a child to the
+node PROP."
   (if (jove-eat jove-BRACKET-L)
       (progn
         (jove-set-node-info prop 'computed)
@@ -789,8 +800,8 @@ Add as a child to the node PROP."
     (if (or (eq jove-NUM (jove-tt (jove-token)))
             (eq jove-STRING (jove-tt (jove-token))))
         (jove-add-child prop (jove-parse-expr-atom))
-      ;; (when is-pattern
-      ;;   (jove-set-face (jove-start (jove-token)) (jove-end (jove-token)) font-lock-variable-name-face))
+      (when is-pattern
+        (jove-set-face (jove-start (jove-token)) (jove-end (jove-token)) font-lock-variable-name-face))
       (jove-add-child prop (jove-parse-identifier t)))))
 
 (defun jove-parse-method (&optional is-generator is-async)
@@ -798,14 +809,24 @@ Add as a child to the node PROP."
 Boolean flags IS-GENERATOR and IS-ASYNC set the global variables
 `jove-in-generator' and `jove--inasync'."
   (let ((node (jove-node-init))
-        (jove--in-function t)           ; FIXME: No longer using globals!
-        (jove--in-generator is-generator)
-        (jove--in-async is-async)
+        (old-in-function (jove-in-function))
+        (old-in-generator (jove-in-generator))
+        (old-in-async (jove-in-async))
         (params (prog1 (jove-node-init)
                   (jove-expect jove-PAREN-L))))
+
+    (jove-set-in-function t)
+    (jove-set-in-generator is-generator)
+    (jove-set-in-async is-async)
+
     (jove-node-finish (jove-add-children* params
-                                  (jove-parse-binding-list jove-PAREN-R))
-                   'parameters)
+                                  (jove-parse-binding-list jove-PAREN-R nil t))
+                  'parameters)
+
+    (jove-set-in-function old-in-function)
+    (jove-set-in-generator old-in-generator)
+    (jove-set-in-async old-in-async)
+
     (jove-add-child node params)
     (jove-parse-function-body node)
     (jove-node-finish node 'function-expression)))
@@ -813,11 +834,21 @@ Boolean flags IS-GENERATOR and IS-ASYNC set the global variables
 (defun jove-parse-arrow-expr (node params &optional is-async)
   "Parse arrow function using supplied NODE with given PARAMS.
 Boolean flag IS-ASYNC sets the global variable `jove--in-asynce'."
-  (let ((jove--in-function t)           ; FIXME: No longer using globals!
-        (jove--in-generator nil)
-        (jove--in-async is-async))
+  (let ((old-in-function (jove-in-function))
+        (old-in-generator (jove-in-generator))
+        (old-in-async (jove-in-async)))
+
+    (jove-set-in-function t)
+    (jove-set-in-generator nil)
+    (jove-set-in-async is-async)
+
     (jove-add-child node (jove-to-assignable params))
     (jove-parse-function-body node t)
+
+    (jove-set-in-function old-in-function)
+    (jove-set-in-generator old-in-generator)
+    (jove-set-in-async old-in-async)
+
     (jove-node-finish node 'arrow-function-expression)))
 
 (defun jove-parse-function-body (parent &optional is-arrow-func)
@@ -938,15 +969,17 @@ Optionally ALLOW-NON-IDENTIFIER arguments."
                                          (jove-unexpected))
                                      (if (or (eq jove-NAME (jove-tt (jove-token)))
                                              (eq jove-BRACKET-L (jove-tt (jove-token))))
-                                         (jove-parse-binding-atom)
+                                         (jove-parse-binding-atom t)
                                        (jove-unexpected))))
                  'rest-element))
 
-(defun jove-parse-binding-atom ()
-  "Parse assignable atom."
+(defun jove-parse-binding-atom (&optional highlight)
+  "Parse assignable atom.
+The boolean HIGHLIGHT flags to set variable name face."
   (cond
    ((eq jove-NAME (jove-tt (jove-token)))
-    (jove-set-face (jove-start (jove-token)) (jove-end (jove-token)) font-lock-variable-name-face)
+    (when highlight
+      (jove-set-face (jove-start (jove-token)) (jove-end (jove-token)) font-lock-variable-name-face))
     (jove-parse-identifier))
    ((eq jove-BRACKET-L (jove-tt (jove-token)))
     ;; `jove-parse-binding-list' returns a plan list. The items need to be
@@ -954,7 +987,7 @@ Optionally ALLOW-NON-IDENTIFIER arguments."
     (let ((node (jove-node-init))
           (bindings (progn
                       (jove-next)
-                      (jove-parse-binding-list jove-BRACKET-R))))
+                      (jove-parse-binding-list jove-BRACKET-R nil highlight))))
       (jove-add-children* node bindings)
       (jove-node-finish node 'array-pattern)))
    ((eq jove-BRACE-L (jove-tt (jove-token)))
@@ -965,11 +998,12 @@ Optionally ALLOW-NON-IDENTIFIER arguments."
 ;; This function is used to parse function and method parameters.
 ;; Perhaps return a node of type 'parameters'... nope it also used
 ;; in parseBindingAtom for ArrayPatterns.
-(defun jove-parse-binding-list (close &optional allow-non-identifier)
+(defun jove-parse-binding-list (close &optional allow-non-identifier highlight)
   "Parse assignable list.
 CLOSE is the token type which ends the list.  Always allow empty
 expressions and trailing commas.  Optionally ALLOW-NON-IDENTIFIER
-arguments to RestElement."
+arguments to RestElement.  The boolean HIGHLIGHT flags to set
+variable name face."
   (let ((first t)
         (elts '()))
     (while (not (jove-eat close))
@@ -983,15 +1017,15 @@ arguments to RestElement."
                   (eq jove-COMMA (jove-tt (jove-token))))
         (push (if (eq jove-ELLIPSIS (jove-tt (jove-token)))
                   (jove-parse-rest allow-non-identifier)
-                (jove-parse-maybe-default (jove-start (jove-token))))
+                (jove-parse-maybe-default (jove-start (jove-token)) nil highlight))
               elts)))
     (nreverse elts)))
 
-(defun jove-parse-maybe-default (start-pos &optional left)
+(defun jove-parse-maybe-default (start-pos &optional left highlight)
   "Parse assignment pattern around a given atom if possible.
 Begin the AssignmentPattern at START-POS.  Optionally supply LEFT
-operand."
-  (setq left (or left (jove-parse-binding-atom)))
+operand.  The boolean HIGHLIGHT flags to set variable name face."
+  (setq left (or left (jove-parse-binding-atom highlight)))
   (if (eq jove-EQ (jove-tt (jove-token)))
       (let ((node (jove-node-init start-pos)))
         (jove-set-node-info node (jove-value (jove-token)))
@@ -1031,21 +1065,22 @@ operand."
   (let ((statements '()))
     (condition-case err
         (while (jove-is-not jove-EOF)
-          (push (jove-parse-statement t t) statements))
+          (push (jove-parse-statement t) statements))
       (jove-parse-error
        (when jove-verbose (message "%s" (cadr err)))))
     (jove-add-children* node (nreverse statements))
     (jove-next)                             ; Move over EOF.
     (jove-node-finish node 'program)))
 
-(defun jove-parse-statement (&optional declaration top-level)
+(defun jove-parse-statement (&optional declaration)
   "Parse a single statement"
   (let ((kind nil)
         (tt (jove-tt (jove-token)))
         (node (jove-node-init)))
     (when (jove-is-let)
       (setq tt jove-VAR)
-      (setq kind 'let))
+      (setq kind 'let)
+      (jove-set-face (jove-start (jove-token)) (jove-end (jove-token)) font-lock-keyword-face))
     (cond
      ((or (eq jove-BREAK tt)
           (eq jove-CONTINUE tt))
@@ -1323,7 +1358,7 @@ statement initializer. KIND should be a symbol of either 'var,
       ;; while editting.
       (unless (jove-eat jove-COMMA)
         (setq decl (jove-node-init))
-        (jove-add-child decl (jove-parse-binding-atom))
+        (jove-add-child decl (jove-parse-binding-atom t))
         (when (eq jove-EQ (jove-tt (jove-token)))
           (jove-next)              ; FIXME: not advancing!
           ;; Add initializer as child if present.
@@ -1340,11 +1375,14 @@ ALLOW-EXPR-BODY permits an expression body if parsing an arrow function.
 The boolean flag IS-ASYNC is used to set the global `jove-in-async'."
   ;; With lexical scope the setting of global var in the `let'
   ;; should protect the global while in scope.
-  (let ((jove--in-generator (and (not is-async) ; FIXME: No longer using globals!
-                             (jove-eat jove-STAR)))
-        (jove--in-async is-async)
-        (jove--in-function t))
-    ;; NOTE: Not tracking scope.
+  (let ((old-in-function (jove-in-function))
+        (old-in-generator (jove-in-generator))
+        (old-in-async (jove-in-async)))
+
+    (jove-set-in-function t)
+    (jove-set-in-generator (and (not is-async) (jove-eat jove-STAR)))
+    (jove-set-in-async is-async)
+
     (when (eq jove-NAME (jove-tt (jove-token)))
       (jove-set-face (jove-start (jove-token)) (jove-end (jove-token)) font-lock-function-name-face)
       (jove-set-node-info node (jove-value (jove-token)))
@@ -1352,6 +1390,10 @@ The boolean flag IS-ASYNC is used to set the global `jove-in-async'."
 
     (jove-parse-function-params node)
     (jove-parse-function-body node allow-expr-body)
+
+    (jove-set-in-function old-in-function)
+    (jove-set-in-generator old-in-generator)
+    (jove-set-in-async old-in-async)
 
     (jove-node-finish node (if is-stat
                             'function-statement
@@ -1361,7 +1403,7 @@ The boolean flag IS-ASYNC is used to set the global `jove-in-async'."
   "Parse function parameters and add as a child to PARENT."
   (let ((params (prog1 (jove-node-init)
                   (jove-expect jove-PAREN-L)))
-        (param-list (jove-parse-binding-list jove-PAREN-R)))
+        (param-list (jove-parse-binding-list jove-PAREN-R nil t)))
     (jove-node-finish (jove-add-children* params
                                          param-list)
                    'parameters)
