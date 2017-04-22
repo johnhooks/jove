@@ -37,7 +37,8 @@ If LEX-STATE not provided create an initial lexer state."
           nil                           ; 2 in-function
           nil                           ; 3 in-async
           nil                           ; 4 in-generator
-          -1))                          ; 5 potential-arrow-at
+          nil                           ; 5 in-declaration
+          -1))                          ; 6 potential-arrow-at
 
 (defsubst jove-token ()
   "Return the 'token' slot of the parser state."
@@ -72,12 +73,19 @@ If LEX-STATE not provided create an initial lexer state."
   "Set the 'in-generator' slot of the parser state to VALUE."
   (aset jove--state 4 value))
 
+(defsubst jove-in-declaration ()
+  "Return the 'in-declaration' slot of the parser state."
+  (aref jove--state 5))
+(defsubst jove-set-in-declaration (value)
+  "Set the 'in-declaration' slot of the parser state to VALUE."
+  (aset jove--state 5 value))
+
 (defsubst jove-potential-arrow-at ()
   "Return the 'potential-arrow-at' slot of the parser state."
-  (aref jove--state 5))
+  (aref jove--state 6))
 (defsubst jove-set-potential-arrow-at (value)
   "Set the 'potential-arrow-at' slot of the parser state to VALUE."
-  (aset jove--state 5 value))
+  (aset jove--state 6 value))
 
 ;;; Initialization
 
@@ -630,8 +638,13 @@ are allowed."
     (if (and can-be-arrow
              (not (jove-can-insert-semicolon-p))
              (eq jove-ARROW (jove-tt (jove-token))))
-        (let ((params (jove-node-init start-pos)))
+        (let ((params (jove-node-init start-pos))
+              (old-in-declaration (jove-in-declaration)))
+
+          (jove-set-in-declaration t)
           (mapc #'jove-to-assignable expr-list)
+          (jove-set-in-declaration old-in-declaration)
+
           (jove-add-children* params (nreverse expr-list))
           (jove-node-finish params 'parameters)
           (jove-next)                         ; Move over '=>'
@@ -782,7 +795,7 @@ of the property."
       ;; FIXME: Create a function to copy a node.
       (jove-add-child prop (jove-node-init (jove-start (jove-prev-token))
                                             (jove-end (jove-prev-token))
-                                            'indentifier
+                                            'identifier
                                             (jove-value (jove-prev-token))))))
    (t
     (jove-unexpected))))
@@ -836,13 +849,16 @@ Boolean flags IS-GENERATOR and IS-ASYNC set the global variables
 Boolean flag IS-ASYNC sets the global variable `jove--in-asynce'."
   (let ((old-in-function (jove-in-function))
         (old-in-generator (jove-in-generator))
-        (old-in-async (jove-in-async)))
+        (old-in-async (jove-in-async))
+        (old-in-declaration (jove-in-declaration)))
 
     (jove-set-in-function t)
     (jove-set-in-generator nil)
     (jove-set-in-async is-async)
+    (jove-set-in-declaration t)
 
     (jove-add-child node (jove-to-assignable params))
+    (jove-set-in-declaration old-in-declaration)
     (jove-parse-function-body node t)
 
     (jove-set-in-function old-in-function)
@@ -921,7 +937,8 @@ If LIBERAL is non-nil keywords are converted to identifiers."
 Updates node type, does not perform check for valid lvalues."
   (let ((type (and node (jove-node-type node))))
     (cond
-     ((eq 'identifier type)
+     ((and (jove-in-declaration)
+           (eq 'identifier type))
       (jove-set-face (jove-node-start node) (jove-node-end node) 'font-lock-variable-name-face))
      ((eq 'object-expression type)
       (jove-set-node-type node 'object-pattern)
@@ -937,9 +954,9 @@ Updates node type, does not perform check for valid lvalues."
       (jove-set-node-type node 'array-pattern)
       (let ((expr (jove-first-child node)))
         (while expr
-          (if (eq 'rest-element (jove-node-type expr))
+          (if (eq 'spread-element (jove-node-type expr))
               (progn
-                (jove-set-node-type expr 'spread-element)
+                (jove-set-node-type expr 'rest-element)
                 (jove-to-assignable (jove-first-child expr)))
             (jove-to-assignable expr))
           (setq expr (jove-next-sibling expr)))))
