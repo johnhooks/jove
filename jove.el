@@ -150,7 +150,7 @@ under point."
 
 ;;; Before and After Change Hook Functions
 
-(defun jove--flush-caches (&optional start ignore)
+(defun jove--flush-caches (&optional start)
   (setq start (or start (save-restriction (widen) (point-min))))
   (setq jove--cache-end (min jove--cache-end start)))
 
@@ -179,7 +179,8 @@ Buffer edit spans from BEG to END and is of length LEN."
   (add-hook 'before-change-functions #'jove--flush-caches t t)
   (add-hook 'after-change-functions #'jove--edit nil t)
 
-  ;; (add-hook 'jove-lexer-chunk-hook #'jove--apply-fontifications)
+  ;; Using `js-mode' syntax propertize function for now.
+  (setq-local syntax-propertize-function #'js-syntax-propertize)
 
   (setq-local electric-indent-chars
                ;FIXME: js2-mode adds "[]*".

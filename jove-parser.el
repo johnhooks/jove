@@ -548,10 +548,11 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
                (not (jove-can-insert-semicolon-p)))
           (cond
            ((jove-eat jove-ARROW)
-            (let ((params (jove-node-init (jove-node-start id)
-                                         (jove-node-end id)
-                                         'parameters)))
+            (let* ((start (jove-node-start id))
+                   (end (jove-node-end id))
+                   (params (jove-node-init start end 'parameters)))
               ;; Wrap the single parameter in a 'parameters' node.
+              (jove-set-face start end 'font-lock-variable-name-face)
               (jove-add-child params id)
               (jove-parse-arrow-expr (jove-node-init start-pos) params nil)))
            ((and (string-equal "async" (jove-node-info id))
@@ -779,6 +780,11 @@ of the property."
          (not (eq jove-BRACE-R (jove-tt (jove-token)))))
     (when (or is-generator is-async is-pattern)
       (jove-unexpected))
+    ;; Highlight the contextual 'get' or 'set' as a keyword.
+    (let ((node (jove-first-child prop)))
+      (jove-set-face (jove-node-start node) (jove-node-end node) 'font-lock-keyword-face))
+    ;; FIXME: The key for the 'get' or 'set' shouldn't be higlighted as
+    ;; a method.
     (jove-clear-children prop)
     (jove-parse-property-name prop)
     ;; Raise no warnings about getter or setter arguments.
@@ -822,12 +828,16 @@ node PROP."
 Boolean flags IS-GENERATOR and IS-ASYNC set the global variables
 `jove-in-generator' and `jove--inasync'."
   (let ((node (jove-node-init))
+        (prev-token (jove-prev-token))
         (old-in-function (jove-in-function))
         (old-in-generator (jove-in-generator))
         (old-in-async (jove-in-async))
         (old-in-declaration (jove-in-declaration))
         (params (prog1 (jove-node-init)
                   (jove-expect jove-PAREN-L))))
+
+    (when (eq jove-NAME (jove-tt prev-token))
+      (jove-set-face (jove-start prev-token) (jove-end prev-token) font-lock-function-name-face))
 
     (jove-set-in-function t)
     (jove-set-in-generator is-generator)
@@ -854,16 +864,15 @@ Boolean flags IS-GENERATOR and IS-ASYNC set the global variables
 Boolean flag IS-ASYNC sets the global variable `jove--in-asynce'."
   (let ((old-in-function (jove-in-function))
         (old-in-generator (jove-in-generator))
-        (old-in-async (jove-in-async))
-        (old-in-declaration (jove-in-declaration)))
+        (old-in-async (jove-in-async)))
 
+    ;; Arguments have already been highlighted.
     (jove-set-in-function t)
     (jove-set-in-generator nil)
     (jove-set-in-async is-async)
-    (jove-set-in-declaration t)
 
     (jove-add-child node (jove-to-assignable params))
-    (jove-set-in-declaration old-in-declaration)
+
     (jove-parse-function-body node t)
 
     (jove-set-in-function old-in-function)

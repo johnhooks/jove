@@ -42,7 +42,7 @@
   :type 'boolean
   :group 'jove-mode)
 
-(defcustom jove-idle-timer-delay 0.25
+(defcustom jove-idle-timer-delay 0.20
   "Delay in secs before re-parsing after user makes changes."
   :type 'number
   :group 'jove-mode)
