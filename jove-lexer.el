@@ -28,8 +28,8 @@
   (remove-text-properties start end '(font-lock-face nil)))
 
 (defun jove-apply-fontifications (start end &optional no-clear)
-  "Apply fontifications between START and END.
-Boolean flag NO-CLEAR will prevent clearing faces before application."
+  "Apply fontifications from START to END.
+Boolean NO-CLEAR flag prevents clearing faces before application."
   (with-silent-modifications
     (unless no-clear (jove-clear-face start end))
     (mapc #'(lambda (f)
@@ -37,12 +37,12 @@ Boolean flag NO-CLEAR will prevent clearing faces before application."
           (nreverse jove--fontifications))  ; Allows applying over those previously pushed.
     (mapc #'(lambda (f)
               (put-text-property (aref f 0) (aref f 1) 'font-lock-face font-lock-warning-face))
-            jove--warnings)
+          jove--warnings)
     (setq jove--fontifications nil
           jove--warnings nil)))     ; Probably shouldn't reset here.
 
 (defun jove-set-face (start end face)
-  "Flag region between START and END for fontification using FACE."
+  "Queue region START to END for fontification using FACE."
   (setq start (min (point-max) start)
         start (max (point-min) start)
         end (min (point-max) end)
@@ -50,9 +50,6 @@ Boolean flag NO-CLEAR will prevent clearing faces before application."
   (push (vector start end face) jove--fontifications))
 
 ;;; Token Types
-
-(defvar jove-keywords (make-hash-table :test 'equal)
-  "Hash table to map keyword names to token types.")
 
 ;; Quoted from acorn/src/tokentype.js
 
@@ -78,9 +75,8 @@ Boolean flag NO-CLEAR will prevent clearing faces before application."
 ;;    continue jumps to that label."
 
 (cl-defun jove-tt-make (label &key keyword before-expr starts-expr
-                             is-loop is-assign prefix postfix binop)
+                          is-loop is-assign prefix postfix binop)
   "Return a vector representing a token type."
-  ;; update-ctx is handled in `jove--update-ctx'
   (vector label                         ; 0
           keyword                       ; 1
           before-expr                   ; 2
@@ -131,6 +127,9 @@ pairs collected in OPTIONS."
   `(puthash (intern ,label)
             (jove-tt-make ,label :keyword t ,@options)
             jove-keywords))
+
+(defvar jove-keywords (make-hash-table :test 'equal)
+  "Hash table to map keyword names to token types.")
 
 (defconst jove-NUM (jove-tt-make "num" :starts-expr t))
 (defconst jove-REGEXP (jove-tt-make "regexp" :starts-expr t))
@@ -188,10 +187,10 @@ pairs collected in OPTIONS."
 (defconst jove-RELATIONAL (jove-binop-make "</>" 7)) ; < > <= >=
 (defconst jove-BITSHIFT (jove-binop-make "<</>>" 8)) ; << >> >>>
 (defconst jove-PLUS-MIN (jove-tt-make "+/-"
-                                 :binop 9
-                                 :before-expr t
-                                 :starts-expr t
-                                 :prefix t))
+                              :binop 9
+                              :before-expr t
+                              :starts-expr t
+                              :prefix t))
 (defconst jove-MODULO (jove-binop-make "%" 10))
 (defconst jove-STAR (jove-binop-make "*" 10))
 (defconst jove-SLASH (jove-binop-make "/" 10))
@@ -293,13 +292,8 @@ pairs collected in OPTIONS."
           t                             ; 6 expr-allowed
           nil))                         ; 7 contains-esc
 
-;; Think I might switch newline-before to index 4, then returning
-;; a token from the lexer with all the necessary information is as
-;; easy as (seq-take state 5).
-
 (defun jove-lex-state-p (state)
   "Return non-nil if STATE is a vector representing lexer state."
-  ;; value can be anything
   (and (vectorp state)
        (= (length state) 8)
        (numberp (aref state 0))
@@ -330,7 +324,7 @@ pairs collected in OPTIONS."
 (defsubst jove-tt (state)
   "Return the 'type' slot of the lexer STATE."
   (aref state 2))
-(defsubst jove-set-type (state value)
+(defsubst jove-set-tt (state value)
   "Set the 'type' slot of the lexer STATE to VALUE."
   (aset state 2 value))
 
@@ -437,12 +431,12 @@ See http://es5.github.io/#x7.6"
    (memq (get-char-code-property char 'general-category)
          '(;; Letters
            Lu Ll Lt Lm Lo Nl
-           ;; Combining Marks
-           Mn Mc
-           ;; Digits
-           Nd
-           ;; Connector Punctuation
-           Pc))))
+              ;; Combining Marks
+              Mn Mc
+              ;; Digits
+              Nd
+              ;; Connector Punctuation
+              Pc))))
 
 ;;; Lexer Utility Functions - Movement
 
@@ -551,8 +545,8 @@ Otherwise signal `jove-unexpected-character-error'."
      ;; '{'  Enter brace statement, expression context.
      ((eq jove-BRACE-L type)
       (jove-ctx-stack-push state (if (jove-brace-is-block-p state prev-tt)
-                                  jove-B-STAT
-                                jove-B-EXPR))
+                                 jove-B-STAT
+                               jove-B-EXPR))
       (jove-set-expr-allowed state t))
      ;; '}' or ')'  Exit either brace or paren context.
      ((or (eq jove-BRACE-R type)
@@ -572,11 +566,11 @@ Otherwise signal `jove-unexpected-character-error'."
      ;; ?(  Enter parenthesis context.
      ((eq jove-PAREN-L type)
       (jove-ctx-stack-push state (if (or (eq jove-IF prev-tt)
-                                      (eq jove-FOR prev-tt)
-                                      (eq jove-WITH prev-tt)
-                                      (eq jove-WHILE prev-tt))
-                                  jove-P-STAT
-                                jove-P-EXPR))
+                                     (eq jove-FOR prev-tt)
+                                     (eq jove-WITH prev-tt)
+                                     (eq jove-WHILE prev-tt))
+                                 jove-P-STAT
+                               jove-P-EXPR))
       (jove-set-expr-allowed state t))
      ;; '${' Enter brace template context.
      ((eq jove-DOLLAR-BRACE-L type)
@@ -611,7 +605,7 @@ Otherwise signal `jove-unexpected-character-error'."
   "Finish token of TYPE and value of VALUE then update the context."
   (jove-set-end state (point))
   (let ((prev-tt (jove-tt state)))
-    (jove-set-type state type)
+    (jove-set-tt state type)
     (jove-set-value state value)
     (jove-update-ctx state prev-tt)))
 
@@ -622,19 +616,17 @@ Otherwise signal `jove-unexpected-character-error'."
 
 (defun jove-finish-op (state type size)
   "Finish operator token of TYPE and SIZE."
-  ;; Acorn uses `pos' think `jove-start' should work... Seems to
-  ;; Not including value. If necessary use `buffer-substring-no-properties'
   (let ((end (+ (point) size)))
     (goto-char end)
     (jove-finish-token state
-                    type
-                    (buffer-substring-no-properties (jove-start state)
-                                                    end))))
+                   type
+                   (buffer-substring-no-properties (jove-start state)
+                                                   end))))
 
 (defun jove-read-token-dot (state)
   "Read a token starting with a period."
   (let ((next (jove-peek-char)))
-    (cond ((and (characterp next)       ; Protect from end of buffer
+    (cond ((and (characterp next)       ; Protect from end of buffer.
                 (<= ?0 next ?9))
            (jove-read-number state t))
           ((and (eq ?. next) (eq ?. (jove-peek-char 2))) ; ...
@@ -1043,24 +1035,19 @@ delimiter."
    ((memq char '(?= ?!)) (jove-read-token-eq-excl state char))
    ((eq ?~ char) (jove-finish-op state jove-PREFIX 1))
    (t
-    ;; Just skip and try again.
+    ;; Skip and try again.
     (jove-warn (point) (1+ (point)) "Unexpected character")
     (forward-char)
     (jove-next-token state))))
 
 (defun jove-next-token (state)
-  "Transition from PREV-STATE, read next token and return new state."
-  ;; Load current token into parser state.
+  "Use previous STATE to read next token and return new state."
   (let ((char nil)
-        (ctx (jove-current-ctx state))
-        ;; (state (vconcat prev-state))
-        )
+        (ctx (jove-current-ctx state)))
     (when (or (not ctx)
               (not (jove-ctx-preserve-space ctx)))
       (jove-set-newline-before state nil)
       (jove-skip-space state))
-    ;; At this point, if there is a newline, I want to save the state
-    ;; in order to load it after a change.
     ;; Initialize current token state.
     (jove-set-start state (point))
     (jove-set-value state nil)
@@ -1070,12 +1057,12 @@ delimiter."
       (jove-finish-token state jove-EOF))
      ((jove-ctx-override ctx)
       (funcall (jove-ctx-override ctx) state))
-     ((or (jove-identifier-start-p char)    ; Identifiers
+     ((or (jove-identifier-start-p char)
           (eq ?\\ char))
       (jove-read-word state))
      (t
       (jove-read-token state char)))
-    state))                             ; Return lexer state vector
+    state))                             ; Return lexer state vector.
 
 (provide 'jove-lexer)
 

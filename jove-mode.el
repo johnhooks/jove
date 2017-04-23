@@ -1,4 +1,4 @@
-;;;; jove.el --- A JavaScript Mode -*- lexical-binding: t; -*-
+;;;; jove-mode.el --- A JavaScript Mode -*- lexical-binding: t; -*-
 
 ;;; Copyright (C) 2017 John Hooks
 
@@ -20,6 +20,8 @@
 ;;; Commentary:
 
 ;;; Code:
+
+(require 'cc-mode)
 
 (require 'jove-lexer)
 (require 'jove-parser)
@@ -46,7 +48,6 @@
   "Cancel any existing parse timer and schedule a new one."
   (when jove--idle-timer
     (cancel-timer jove--idle-timer))
-  (setq jove--parsing nil)
   (let ((timer (timer-create)))
     (setq jove--idle-timer timer)
     (timer-set-function timer 'jove--idle-reparse (list (current-buffer)))
@@ -56,14 +57,14 @@
 (defun jove--idle-reparse (buffer)
   "Run `jove--reparse' if BUFFER is the current buffer, or schedule
 it to be reparsed when the buffer is selected."
-  (cond ((eq buffer (current-buffer))
-         (jove--reparse))
-        ((buffer-live-p buffer)
-         ;; reparse when the buffer is selected again
-         (with-current-buffer buffer
-           (add-hook 'window-configuration-change-hook
-                     #'jove--idle-reparse-inner
-                     nil t)))))
+  (cond
+   ((eq buffer (current-buffer))
+    (jove--reparse))
+   ((buffer-live-p buffer)
+    (with-current-buffer buffer
+      (add-hook 'window-configuration-change-hook
+                #'jove--idle-reparse-inner
+                nil t)))))
 
 (defun jove--idle-reparse-inner ()
   (remove-hook 'window-configuration-change-hook
@@ -80,33 +81,6 @@ it to be reparsed when the buffer is selected."
               jove--warnings nil)
         (jove-parse))
     (setq jove--idle-timer nil)))
-
-(defun jove-query-pos (vec pos &optional force)
-  "Use binary search to find a token in VEC at POS.
-Return the index of the token if found, otherwise -1. Boolean
-flag FORCE returns the index of next token if one is not found
-under point."
-  (let ((current nil)
-        (guess 0)
-        (min 0)
-        (max (1- (length vec))))
-    (catch 'index
-      (while t
-        (when (< max min)
-          (throw 'index (if force min -1)))
-        (setq guess (/ (+ max min) 2)
-              current (aref vec guess))
-        (cond
-         ((and (<= (jove-start current) pos)
-               (> (jove-end current) pos))
-          ;; found it!
-          (throw 'index guess))
-         ((< (jove-start current) pos)     ; (< 1 9)
-          ;; too low                         ^ location in search
-          (setq min (1+ guess)))
-         ((> (jove-end current) pos)       ; (> 9 1)
-          ;; too high                        ^ location in search
-          (setq max (1- guess))))))))
 
 ;;; Indentation Functions
 
@@ -150,7 +124,8 @@ under point."
 
 ;;; Before and After Change Hook Functions
 
-(defun jove--flush-caches (&optional start)
+(defun jove--flush-caches (&optional start ignore)
+  ;; Don't know what the IGNORE argument is for.
   (setq start (or start (save-restriction (widen) (point-min))))
   (setq jove--cache-end (min jove--cache-end start)))
 
@@ -180,6 +155,7 @@ Buffer edit spans from BEG to END and is of length LEN."
   (add-hook 'after-change-functions #'jove--edit nil t)
 
   ;; Using `js-mode' syntax propertize function for now.
+  ;; Regular expression are messing up syntax-ppss.
   (setq-local syntax-propertize-function #'js-syntax-propertize)
 
   (setq-local electric-indent-chars
@@ -190,6 +166,6 @@ Buffer edit spans from BEG to END and is of length LEN."
 
   (jove--reparse t))
 
-(provide 'jove)
+(provide 'jove-mode)
 
-;;; jove.el ends here
+;;; jove-mode.el ends here

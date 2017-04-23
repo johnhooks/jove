@@ -1,7 +1,7 @@
 #+TITLE:  By Jove! Yet Another JavaScript Editing Mode
 #+AUTHOR: John Hooks
 #+EMAIL: john@bitmachina.com
-#+DATE: <2017-04-21 Fri>
+#+DATE: <2017-04-22 Sat>
 #+STARTUP: indent
 #+STARTUP: hidestars
 
@@ -27,18 +27,31 @@ provide complex highlighting and indentation functionality.
   By Mihai Bazon
 
 ** Installation
-Probably shouldn't not do that quite yet... getting close though!
+Jove is still a work in progress. Though if you want to check it out,
+clone this repository, add it to your ~load-path~ and then require it.
+Optionally if you think its pretty cool, add it as the default mode for
+JavaScript.
+
+#+begin_src emacs-lisp
+  (add-to-list 'load-path (expand-file-name "elisps/jove"
+                                            user-emacs-directory))
+  (require 'jove)
+  (add-to-list 'auto-mode-alist '("\\.js$" . jove-mode))
+#+end_src
 
 ** Reasoning
 Shear madness.
 
 After getting frustrated in an attempt to modify the indentation code
-of ~js.el~, I concluded a /*simple*/ (ha, ha, ha...)  syntax parser
-would provide a more complete understanding of the code for editing
-purposes. Plus I needed something to do in my spare time.
+of ~js.el~, I concluded a /simple*/ syntax parser would provide a more
+complete understanding of the code for editing purposes. Plus I needed
+something to do in my spare time.
+
+\star ha, ha, ha...
 
 ** Working
 The functions of the lexer are complete and tested. The parser
 functions are mostly complete and untested. I have been performing
 informal tests of the parser with [[http://underscorejs.org/][Underscore]] and [[http://jquery.com][JQuery]], it seems to
 be parsing everything correctly.
+
