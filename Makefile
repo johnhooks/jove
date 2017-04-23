@@ -20,5 +20,6 @@ clean:
 
 test:
 	${EMACS} $(BATCHFLAGS) -L . -l test/jove-lexer-test.el \
-	  -l test/jove-context-test.el -f ert-run-tests-batch-and-exit
+    -l test/jove-context-test.el -l test/jove-parser-test.el \
+	-f ert-run-tests-batch-and-exit
 
