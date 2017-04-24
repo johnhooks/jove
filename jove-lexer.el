@@ -352,7 +352,7 @@ pairs collected in OPTIONS."
   "Return the 'ctx-stack' slot of the lexer STATE."
   (aref state 5))
 (defsubst jove-ctx-stack-push (state value)
-  "Push on top of the 'ctx-stack' of the lexer STATE a VALUE."
+  "Push on to the 'ctx-stack' of the lexer STATE a VALUE."
   (aset state 5 (cons value (aref state 5))))
 (defsubst jove-ctx-stack-pop (state)
   "Pop the 'ctx-stack' of the lexer STATE."
