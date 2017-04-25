@@ -52,7 +52,7 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
 (defsubst jove-set-token-face (token face)
   "Queue TOKEN region for fontification using FACE."
   ;;  `jove-start' is not defined yet here.
-  (jove-set-face (aref 0 token) (aref 0 token) face))
+  (jove-set-face (aref token 0) (aref token 0) face))
 
 ;;; Token Types
 
