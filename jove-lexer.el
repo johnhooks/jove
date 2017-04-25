@@ -49,6 +49,11 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
         end (max (point-min) end))
   (push (vector start end face) jove--fontifications))
 
+(defsubst jove-set-token-face (token face)
+  "Queue TOKEN region for fontification using FACE."
+  ;;  `jove-start' is not defined yet here.
+  (jove-set-face (aref 0 token) (aref 0 token) face))
+
 ;;; Token Types
 
 ;; Quoted from acorn/src/tokentype.js
