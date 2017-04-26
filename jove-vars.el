@@ -42,6 +42,11 @@
   :type 'boolean
   :group 'jove-mode)
 
+(defcustom jove-debug nil
+  "Print parsing errors to *Messages* buffer."
+  :type 'boolean
+  :group 'jove-mode)
+
 (defcustom jove-idle-timer-delay 0.20
   "Delay in secs before re-parsing after user makes changes."
   :type 'number

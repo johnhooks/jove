@@ -253,7 +253,7 @@ beginning of the message.  Unless the error TYPE is supplied
 throw a `jove-parse-error'."
   (let ((start (or start (jove-start (jove-token))))
         (end (or end (jove-end (jove-token)))))
-    (jove-warn start end 'font-lock-warning-face)
+    (jove-set-face start end 'js2-error)
     (signal (or type 'jove-parse-error)
             (list (format "[%d,%d] Parse error: %s" start end message) start end))))
 
@@ -1135,7 +1135,7 @@ Add top level statements as children to NODE."
         (while (jove-is-not jove-EOF)
           (push (jove-parse-statement t) statements))
       (jove-parse-error
-       (when jove-verbose (message "%s" (cadr err)))))
+       (when jove-debug (message "%s" (cadr err)))))
     (jove-add-children* node (nreverse statements))
     (jove-next)                             ; Move over EOF.
     (jove-node-finish node 'program)))

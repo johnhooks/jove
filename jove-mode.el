@@ -129,6 +129,12 @@ it to be reparsed when the buffer is selected."
   (interactive)
   (setq jove-verbose (not jove-verbose)))
 
+(defun jove-toggle-debug ()
+  "Toggle debug parser messages."
+  (interactive)
+  (setq jove-debug (not jove-debug))
+  (jove--reparse t))
+
 (defun jove-toggle-regex-extras ()
   "Toggle extra regular expression highlighting."
   (interactive)
