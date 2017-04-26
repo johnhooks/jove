@@ -49,10 +49,10 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
         end (max (point-min) end))
   (push (vector start end face) jove--fontifications))
 
-(defsubst jove-set-token-face (token face)
+(defsubst jove-token-set-face (token face)
   "Queue TOKEN region for fontification using FACE."
   ;;  `jove-start' is not defined yet here.
-  (jove-set-face (aref token 0) (aref token 0) face))
+  (jove-set-face (aref token 0) (aref token 1) face))
 
 ;;; Token Types
 
@@ -269,13 +269,6 @@ pairs collected in OPTIONS."
 (defvar jove-P-EXPR (jove-ctx-make "(" :is-expr t))
 (defvar jove-F-EXPR (jove-ctx-make "function" :is-expr t))
 (defvar jove-Q-TMPL (jove-ctx-make "`" :is-expr t :preserve-space t :override #'jove-read-tmpl-token))
-
-;;; Regular Expressions
-
-(defvar jove-binary-re "[0-1]+")
-(defvar jove-octal-re "[0-7]+")
-(defvar jove-decimal-re "[0-9]+")
-(defvar jove-hexadecimal-re "[0-9A-Fa-f]+")
 
 ;;; Lexer State
 
@@ -835,38 +828,135 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
           (t                            ; Any other escape
            (forward-char)))))
 
-(defun jove-read-regexp (state)
-  "Read regular expression.
-Criteria include ending delimiter and flags."
+(defun jove-read-regexp-class ()
+  "Read regular expression class."
+  (catch 'char-class
+    (let (char)
+      (while t
+        ;; Advance to next critical character.
+        (re-search-forward "[^\]\\\\\C-j]*" nil t) ; ?] ?\ or ?\C-j
+        (setq char (char-after))
+        (cond
+         ((eq ?\\ char)
+          (forward-char))
+         ((eq ?\] char)
+          (forward-char)
+          (throw 'char-class t))
+         (t
+          ;; Hit eol or eof.
+          (throw 'char-class nil)))))))
+
+(defun jove-read-regexp-simple (state)
+  "Read regular expression without extra fontifications."
   (forward-char)                        ; Move over opening delimiter.
-  (let (char
-        in-class
-        (looking t))
-    (while looking
-      ;; Advance to next critical character.
-      (re-search-forward "[^\][/\\\\\C-j]*" nil t) ; ][/\ or \n
-      (setq char (char-after))
-      (cond
-       ;; Found escape.
-       ((eq ?\\ char)
-        (jove-read-escape-char nil))
-       ;; Found closing delimiter, exit the loop if not in a class.
-       ((eq ?\/ char)
-        (forward-char)
-        (unless in-class (setq looking nil)))
-       ((eq ?\[ char)
-        (forward-char)
-        (unless in-class (setq in-class t))) ; Enter character class
-       ((and in-class (eq ?\] char))
-        (forward-char)
-        (setq in-class nil))            ; Exit character class
-       ;; Hit eol or eof, signal error.
-       (t
-        (setq looking nil)
-        (jove-warn (jove-start state) (point) "Missing regular expression closing delimiter")))))
-  (skip-syntax-forward "w")       ; Advance over flags, valid or not
+  (let (char)
+    (catch 'regexp
+      (while t
+        ;; Advance to next critical character.
+        (re-search-forward "[^[/\\\\\C-j]*" nil t) ; ][/\ or \n
+        (setq char (char-after))
+        (cond
+         ;; Found escape.
+         ((eq ?\\ char)
+          (jove-read-escape-char nil))
+         ;; Found closing delimiter, exit the loop if not in a class.
+         ((eq ?\/ char)
+          (forward-char)
+          ;; Advance over flags, valid or not
+          (skip-syntax-forward "w")
+          (throw 'regexp t))
+         ;; Enter character class
+         ((eq ?\[ char)
+          (forward-char)
+          (jove-read-regexp-class))
+         ;; Hit eol or eof, signal error.
+         (t
+          (jove-warn (jove-start state) (point) "Missing regex delimiter")
+          (throw 'regexp nil))))))
   (jove-finish-token state jove-REGEXP)
   (jove-set-face (jove-start state) (point) font-lock-string-face))
+
+(defun jove-read-regexp-extras (state)
+  "Read regular expression with extra fontifications."
+  (forward-char)                        ; Move over opening delimiter.
+  (let ((char nil)
+        (looking t)
+        (in-paren '())
+        (in-curly '())
+        (fontifies '())
+        (face 'font-lock-regexp-grouping-construct))
+    (catch 'regexp
+      (while looking
+        ;; Advance to next critical character.
+        (re-search-forward "[^[(){}^$*+?.|/\\\\\C-j]*" nil t) ; ]()[/\ or \n
+        (setq char (char-after))
+        (cond
+         ;; Found closing delimiter, exit the loop if not in a class.
+         ((eq ?\/ char)
+          (forward-char)
+          ;; Advance over flags, valid or not.
+          (skip-syntax-forward "w")
+          (throw 'regexp t))
+         ;; Found escape.
+         ((eq ?\\ char)
+          (forward-char)
+          ;; Need to protect from unicode escape sequences with curlies
+          ;; if fontifing regular expression grouping characters. Otherwise
+          ;; just skip one character.
+          (if jove-fontify-regexp-grouping-chars
+              (or (jove-eat-re "u{[0-9a-fA-F]\\{1,\\}}")
+                  (forward-char))
+            (forward-char)))
+         ;; Found character class.
+         ((eq ?\[ char)
+          (forward-char)
+          ;; Maybe fontify the character class negation.
+          (if (looking-at-p "\\^")
+              (push (list  (1- (point)) (1+ (point)) face) fontifies)
+            (push (list (1- (point)) (point) face) fontifies))
+          (if (jove-read-regexp-class)
+              (push (list  (1- (point)) (point) face) fontifies)
+            ;; Hit eol or eof, finish and warn.
+            (jove-warn (jove-start state) (point) "Missing regex delimiter.")
+            (throw 'regexp 'nil)))
+         ;; Found paren grouping construct.
+         ((memq char '(?\( ?\) ?^ ?$ ?* ?+ ?? ?. ?|))
+          (when (or (and (eq ?\( char)
+                         (push t in-paren)
+                         (save-excursion
+                           (forward-char)
+                           (when (looking-at "\\?[:=!]")
+                             (push (list (point) (+ (point) 2) face) fontifies))))
+                    (and (eq ?\) char)
+                         (pop in-paren))
+                    (memq char '(?^ ?$ ?* ?+ ?? ?. ?|)))
+            (push (list (point) (1+ (point)) face) fontifies))
+          (forward-char))
+         ;; Found opening curley grouping construct.
+         ((eq ?\{ char)
+          (when (not in-curly)
+            (setq in-curly (point)))
+          (forward-char))
+         ;; Found closing curley grouping construct.
+         ((eq ?\} char)
+          (when in-curly
+            (push (list in-curly (1+ (point)) face) fontifies)
+            (setq in-curly nil))
+          (forward-char))
+         ;; Hit eol or eof, signal error.
+         (t
+          (setq looking nil)
+          (jove-warn (jove-start state) (point) "Missing regular expression closing delimiter")))))
+    (jove-finish-token state jove-REGEXP)
+    (jove-set-face (jove-start state) (point) font-lock-string-face)
+    (dolist (f fontifies)
+      (apply #'jove-set-face f))))
+
+(defun jove-read-regexp (state)
+  "Read a regular expression."
+  (if jove-fontify-regexp-grouping-chars
+      (jove-read-regexp-extras state)
+    (jove-read-regexp-simple state)))
 
 (defun jove-read-string (state punc)
   "Search for ending delimiter matching PUNC.

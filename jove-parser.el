@@ -253,6 +253,7 @@ beginning of the message.  Unless the error TYPE is supplied
 throw a `jove-parse-error'."
   (let ((start (or start (jove-start (jove-token))))
         (end (or end (jove-end (jove-token)))))
+    (jove-warn start end 'font-lock-warning-face)
     (signal (or type 'jove-parse-error)
             (list (format "[%d,%d] Parse error: %s" start end message) start end))))
 
@@ -1536,7 +1537,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
 
         (when (setq is-generator (jove-eat jove-STAR))
           ;; Highlight '*'.
-          (jove-set-token-face (jove-prev-token) 'font-lock-function-name-face))
+          (jove-token-set-face (jove-prev-token) 'font-lock-function-name-face))
         
         (jove-parse-property-name method)
         (jove-node-set-prop method :static
@@ -1547,11 +1548,11 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
           ;; Get rid of 'static' as first child.
           (jove-clear-children method)
           ;; Highlight 'static'.
-          (jove-set-token-face (jove-prev-token) 'font-lock-keyword-face)
+          (jove-token-set-face (jove-prev-token) 'font-lock-keyword-face)
           ;; Don't care if is-generator was already assigned before.
           (setq is-generator (jove-eat jove-STAR))
           ;; Highlight '*'.
-          (jove-set-token-face (jove-prev-token) 'font-lock-function-name-face)
+          (jove-token-set-face (jove-prev-token) 'font-lock-function-name-face)
           ;; Reparse method key.
           (jove-parse-property-name method))
 

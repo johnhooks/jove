@@ -122,6 +122,21 @@ it to be reparsed when the buffer is selected."
       (indent-line-to (jove--proper-indentation parse-status))
       (when (> offset 0) (forward-char offset)))))
 
+;;; Settings Toggle Function
+
+(defun jove-toggle-verbose ()
+  "Toggle verbose parser messages."
+  (interactive)
+  (setq jove-verbose (not jove-verbose)))
+
+(defun jove-toggle-regex-extras ()
+  "Toggle extra regular expression highlighting."
+  (interactive)
+  (setq jove-fontify-regexp-grouping-chars
+        (not jove-fontify-regexp-grouping-chars))
+  (jove--reparse t))
+
+
 ;;; Before and After Change Hook Functions
 
 (defun jove--flush-caches (&optional start ignore)
