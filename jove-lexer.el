@@ -922,11 +922,11 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
          ;; Found paren grouping construct.
          ((memq char '(?\( ?\) ?^ ?$ ?* ?+ ?? ?. ?|))
           (when (or (and (eq ?\( char)
-                         (push t in-paren)
-                         (save-excursion
-                           (forward-char)
-                           (when (looking-at "\\?[:=!]")
-                             (push (list (point) (+ (point) 2) face) fontifies))))
+                         (prog1 (push t in-paren)
+                           (save-excursion
+                             (forward-char)
+                             (when (looking-at "\\?[:=!]")
+                               (push (list (point) (+ (point) 2) face) fontifies)))))
                     (and (eq ?\) char)
                          (pop in-paren))
                     (memq char '(?^ ?$ ?* ?+ ?? ?. ?|)))
