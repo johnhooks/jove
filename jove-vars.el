@@ -81,6 +81,19 @@ Does not include the backslash character.")
   "A regular expression string to match regexp escape sequences.
 Does not include the backslash character.")
 
+;; Recoverable Error Messages
+
+(defconst jove-messages
+  (let ((hash (make-hash-table :test 'eq)))
+    (mapc #'(lambda (pair)
+              (puthash (car pair) (cadr pair) hash))
+          '((:await-outside-async
+             "found 'await' used outside of an async function.")
+            (:cannot-insert-semi
+             "unable to insert semicolon after statement.")))
+    hash)
+  "A hash table containing recoverable error keys and messages.")
+
 ;;; Errors
 
 (define-error 'jove-error "A jove error")
@@ -126,6 +139,10 @@ Private variable.")
 
 (defvar-local jove--warnings '()
   "A list to hold queued warnings.
+Private variable.")
+
+(defvar-local jove--errors '()
+  "A list to hold queued errors.
 Private variable.")
 
 ;;; Lexer Hooks

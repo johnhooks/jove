@@ -54,6 +54,11 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
   ;;  `jove-start' is not defined yet here.
   (jove-set-face (aref token 0) (aref token 1) face))
 
+(defsubst jove-node-set-face (node face)
+  "Queue NODE region for fontification using FACE."
+  ;;  `jove-start' is not defined yet here.
+  (jove-set-face (aref (car (car node)) 0) (aref (car (car node)) 1) face))
+
 ;;; Token Types
 
 ;; Quoted from acorn/src/tokentype.js

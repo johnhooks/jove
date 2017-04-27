@@ -38,7 +38,8 @@ If LEX-STATE not provided create an initial lexer state."
           nil                           ; 3 in-async
           nil                           ; 4 in-generator
           nil                           ; 5 in-declaration
-          -1))                          ; 6 potential-arrow-at
+          nil                           ; 6 error-p
+          -1))                          ; 7 potential-arrow-at
 
 (defsubst jove-token ()
   "Return the 'token' slot of the parser state."
@@ -60,10 +61,10 @@ If LEX-STATE not provided create an initial lexer state."
   (aset jove--state 2 value))
 
 (defsubst jove-in-async ()
-  "Return the 'is-async' slot of the parser state."
+  "Return the 'in-async' slot of the parser state."
   (aref jove--state 3))
 (defsubst jove-set-in-async (value)
-  "Set the 'is-async' slot of the parser state to VALUE."
+  "Set the 'in-async' slot of the parser state to VALUE."
   (aset jove--state 3 value))
 
 (defsubst jove-in-generator ()
@@ -80,12 +81,19 @@ If LEX-STATE not provided create an initial lexer state."
   "Set the 'in-declaration' slot of the parser state to VALUE."
   (aset jove--state 5 value))
 
+(defsubst jove-error ()
+  "Return the 'error' slot of the parser state."
+  (aref jove--state 6))
+(defsubst jove-set-error (value)
+  "Set the 'error' slot of the parser state to VALUE."
+  (aset jove--state 6 value))
+
 (defsubst jove-potential-arrow-at ()
   "Return the 'potential-arrow-at' slot of the parser state."
-  (aref jove--state 6))
+  (aref jove--state 7))
 (defsubst jove-set-potential-arrow-at (value)
   "Set the 'potential-arrow-at' slot of the parser state to VALUE."
-  (aset jove--state 6 value))
+  (aset jove--state 7 value))
 
 ;;; Initialization
 
@@ -245,21 +253,25 @@ Evaluate BODY with VAR (car of SPEC) bound to each child from NODE."
 
 ;;; Utility Functions
 
-(cl-defun jove-error (message &key start end type)
+(defsubst jove-format-error (start end message)
+  "Use START and END to prepend location data onto MESSAGE."
+  (format "[%d,%d] Parse error: %s" start end message))
+
+(cl-defun jove-signal (message &key start end type)
   "Signal an error with a MESSAGE.
 If START or END not supplied, data from the current token is
-used.  The error start and end locations are added to the
-beginning of the message.  Unless the error TYPE is supplied
-throw a `jove-parse-error'."
+used.  Unless the error TYPE is supplied throw a `jove-parse-error'."
   (let ((start (or start (jove-start (jove-token))))
         (end (or end (jove-end (jove-token)))))
     (jove-set-face start end 'js2-error)
     (signal (or type 'jove-parse-error)
-            (list (format "[%d,%d] Parse error: %s" start end message) start end))))
+            (list (jove-format-error start end message) start end))))
 
-(defun jove-unexpected ()
+(defun jove-unexpected (&optional message-key)
   "Signal an unexpected token parse error."
-  (jove-error (format "unexpected token: %s" (jove-tt-label (jove-tt (jove-token))))))
+  (let ((message (gethash message-key jove-messages)))
+    (jove-signal (or message
+                (format "unexpected token: %s" (jove-tt-label (jove-tt (jove-token))))))))
 
 (defsubst jove-is (tt)
   "Return non-nil if the current token is of the type TT."
@@ -286,7 +298,7 @@ throw an error."
           (found (if (jove-is jove-NAME)
                      (jove-value (jove-token))
                    (jove-tt-label (jove-tt (jove-token))))))
-      (jove-error (format "expected '%s' found '%s'" expected found)))))
+      (jove-signal (format "expected '%s' found '%s'" expected found)))))
 
 (defun jove-after-trailing-comma-p (tt &optional not-next)
   "Return non-nil if the current token is of the type TT.
@@ -297,10 +309,10 @@ Advance to next token, unless NOT-NEXT."
       (jove-next))
     t))
 
-(defun jove-is-contextual (name)
+(defun jove-is-contextual (name &optional token)
   "Test whether current token is a contextual keyword NAME."
-  (and (eq jove-NAME (jove-tt (jove-token)))
-       (string-equal name (jove-value (jove-token)))))
+  (and (eq jove-NAME (jove-tt (or token (jove-token))))
+       (string-equal name (jove-value (or token (jove-token))))))
 
 (defun jove-eat-contextual (name)
   "Consume contextual keyword NAME is possible."
@@ -313,17 +325,49 @@ Advance to next token, unless NOT-NEXT."
       (eq jove-BRACE-R (jove-tt (jove-token)))
       (jove-newline-before (jove-token))))
 
-(defun jove-semicolon ()
-  "Consume a semicolon or pretend there is a semicolon."
-  (unless (or (jove-eat jove-SEMI)
-              (jove-can-insert-semicolon-p))
-    (jove-unexpected)))
+(defun jove-semicolon (node)
+  "Consume a semicolon or, if allowed, pretend one is there.
+Return the value of the last sexp in BODY.  Though if unable to
+eat a semicolon, flag next statement as junk."
+  (declare (indent 0))
+  (if (or (jove-eat jove-SEMI)
+          (jove-can-insert-semicolon-p))
+      node
+    (prog1 node
+      (jove-set-error :cannot-insert-semi))))
 
 (defun jove-null-expression ()
   "Create a null expression.
 Used as a place holder is some type of nodes."
   (let ((end (jove-end (jove-prev-token))))
     (jove-node-init end end 'null-expression)))
+
+;;; Parse Error Handler
+
+(defun jove-handle-error (node)
+  "If `jove-error' and `jove-debug' message error and fontifiy NODE.
+Return NODE.  Error message is printed to *Message* buffer.  And
+region between `jove-node-start' and `jove-node-end' are
+fontified with `js2-error' face."
+  (when (jove-error)
+    (when jove-debug
+      (let ((error-message nil)
+            (error-key (jove-error)))
+        (cond
+         ((and (eq :cannot-insert-semi error-key)
+               (jove-is-contextual "await" (jove-prev-token)))
+          (setq error-key :await-outside-async)))
+        (setq error-message (or (gethash error-key jove-messages)
+                                "unknown error"))
+        ;; TODO: Push error to `jove--errors'.
+        (message (jove-format-error (jove-node-start node)
+                                (jove-node-end node)
+                                error-message))
+        (jove-node-set-face node 'js2-error)))
+    ;; When error set node property `:junk' to t.
+    (jove-node-set-prop node :junk t)
+    (jove-set-error nil))
+  node)
 
 ;;; Expression Parsing Functions
 
@@ -1150,7 +1194,7 @@ declaration."
     (when (jove-is-let)
       (setq tt jove-VAR)
       (setq kind 'let)
-      (jove-set-face (jove-start (jove-token)) (jove-end (jove-token)) font-lock-keyword-face))
+      (jove-token-set-face (jove-token) 'font-lock-keyword-face))
     (cond
      ((or (eq jove-BREAK tt)
           (eq jove-CONTINUE tt))
@@ -1197,27 +1241,31 @@ declaration."
                  (eq 'identifier (jove-node-type expr))
                  (jove-eat jove-COLON))
             (jove-parse-labeled-statement node maybe-name expr)
-          (jove-parse-expression-statement node expr)))))))
+          (jove-parse-expression-statement node expr)))))
+    ;; Handle error if one exists, either way return NODE.
+    (if (jove-error)
+        (jove-handle-error node)
+      node)))
 
 (defun jove-parse-break-continue-statement (node tt)
   "Return NODE as either a 'break' or 'continue' statement.
 Differentiate between the two using the token type TT."
   (jove-next)
-  (unless (or (jove-eat jove-SEMI)
+  (unless (or (jove-is jove-SEMI)
               (jove-can-insert-semicolon-p))
     (if (not (eq jove-NAME (jove-tt (jove-token))))
         (jove-unexpected)
-      (jove-add-child node (jove-parse-identifier))
-      (jove-semicolon)))
-  (jove-node-finish node (if (eq jove-BREAK tt)
-                         'break-statement
-                       'continue-statement)))
+      (jove-add-child node (jove-parse-identifier))))
+  (jove-semicolon
+    (jove-node-finish node (if (eq jove-BREAK tt)
+                           'break-statement
+                         'continue-statement))))
 
 (defun jove-parse-debugger-statement (node)
   "Return NODE as a 'debugger' statement."
   (jove-next)
-  (jove-semicolon)
-  (jove-node-finish node 'debugger-statement))
+  (jove-semicolon
+    (jove-node-finish node 'debugger-statement)))
 
 (defun jove-parse-do-statement (node)
   "Return NODE as a 'do' statement."
@@ -1275,11 +1323,11 @@ The boolean IS-ASYNC flags an async function."
 (defun jove-parse-return-statement (node)
   "Return NODE as a 'return' statement."
   (jove-next)
-  (unless (or (jove-eat jove-SEMI)
+  (unless (or (jove-is jove-SEMI)
               (jove-can-insert-semicolon-p))
-    (jove-add-child node (jove-parse-expression))
-    (jove-semicolon))
-  (jove-node-finish node 'return-statement))
+    (jove-add-child node (jove-parse-expression)))
+  (jove-semicolon
+    (jove-node-finish node 'return-statement)))
 
 (defun jove-parse-switch-statement (node)
   "Return NODE as a 'switch' statement."
@@ -1318,8 +1366,8 @@ The boolean IS-ASYNC flags an async function."
   (jove-add-child node (if (jove-newline-before (jove-token))
                        (jove-null-expression)
                      (jove-parse-expression)))
-  (jove-semicolon)
-  (jove-node-finish node 'throw-statement))
+  (jove-semicolon
+    (jove-node-finish node 'throw-statement)))
 
 (defun jove-parse-try-statement (node)
   "Return NODE as a 'try' statement."
@@ -1342,8 +1390,8 @@ The boolean IS-ASYNC flags an async function."
 KIND should be a symbol of either 'var, 'let or 'const."
   (jove-next)
   (jove-parse-var node nil kind)
-  (jove-semicolon)
-  (jove-node-finish node 'variable-declaration))
+  (jove-semicolon
+    (jove-node-finish node 'variable-declaration)))
 
 (defun jove-parse-while-statement (node)
   "Return NODE as a 'while' statement."
@@ -1376,8 +1424,8 @@ KIND should be a symbol of either 'var, 'let or 'const."
   "Return NODE as an expression statement.
 EXPRESSION is supplied by `jove-parse-statement'."
   (jove-add-child node expression)
-  (jove-semicolon)
-  (jove-node-finish node 'expression-statement))
+  (jove-semicolon
+    (jove-node-finish node 'expression-statement)))
 
 (defun jove-parse-block ()
   "Return NODE as a block of statements."
