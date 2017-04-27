@@ -1353,7 +1353,7 @@ The boolean IS-ASYNC flags an async function."
             (jove-unexpected)
           (jove-add-child current (jove-parse-statement t)))))
     (when current (jove-node-finish current 'switch-case))
-
+    (jove-add-children* node cases)
     (jove-next)                             ; Move over '}'
     (jove-node-finish node 'switch-statement)))
 
