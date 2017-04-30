@@ -23,6 +23,7 @@
 
 (require 'cc-mode)
 
+(require 'jove-identifier)
 (require 'jove-lexer)
 (require 'jove-parser)
 
@@ -35,10 +36,15 @@
 (defvar jove-mode-syntax-table
   (let ((table (make-syntax-table)))
     (c-populate-syntax-table table)
-    ;; Don't know why '+' was a word or symbol char before here.
     (modify-syntax-entry ?+ "." table)
-    (modify-syntax-entry ?$ "_" table)
+    (modify-syntax-entry ?$ "w" table)
+    (modify-syntax-entry ?_ "w" table)
     (modify-syntax-entry ?` "\"" table)
+    (modify-syntax-entry '(?0 . ?9) "_" table)
+    (dolist (char jove-syntax-word-chars)
+      (modify-syntax-entry char "w" table))
+    (dolist (char jove-syntax-symbol-chars)
+      (modify-syntax-entry char "_" table))
     table)
   "Syntax table for `jove-mode'.")
 

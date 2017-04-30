@@ -72,6 +72,9 @@
 (defconst jove-hexadecimal-re "[0-9A-Fa-f]+"
   "A regular expression to match a hexadecimal number.")
 
+(defconst jove-number-re "[0-9]+\\(?:\\.[0-9]*\\)?\\(?:[eE][-+]?[0-9]+\\)?"
+  "A regular expression to match a javascript integer or float number.")
+
 (defconst jove-escape-re (concat "\\([fnrtv]\\|x[0-9a-fA-F]\\{2\\}\\|c[A-Z]\\|"
                              "u\\([0-9a-fA-F]\\{4\\}\\|{[0-9a-fA-F]\\{1,\\}}\\)\\)")
   "A regular expression string to match escape sequences.
@@ -130,7 +133,7 @@ Private variable.")
 Private variable.")
 
 (defvar-local jove--string-buffer nil
-  "List of chars built up while scanning various tokens.
+  "List of string chunks built up while scanning various tokens.
 Private variable.")
 
 (defvar-local jove--fontifications nil
@@ -144,6 +147,9 @@ Private variable.")
 (defvar-local jove--errors '()
   "A list to hold queued errors.
 Private variable.")
+
+(defvar-local jove--timeline '()
+  "A list to hold copies of the parser state before each token.")
 
 ;;; Lexer Hooks
 

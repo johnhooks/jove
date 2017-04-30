@@ -59,6 +59,12 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
   ;;  `jove-start' is not defined yet here.
   (jove-set-face (aref (car (car node)) 0) (aref (car (car node)) 1) face))
 
+(defsubst jove-set-face* (vec face)
+  "Queue region for fontification using FACE.
+Use location data in `jove-start' and `jove-end' of VEC."
+  ;;  `jove-start' is not defined yet here.
+  (jove-set-face (aref vec 0) (aref vec 1) face))
+
 ;;; Token Types
 
 ;; Quoted from acorn/src/tokentype.js
@@ -295,19 +301,6 @@ pairs collected in OPTIONS."
           t                             ; 6 expr-allowed
           nil))                         ; 7 contains-esc
 
-(defun jove-lex-state-p (state)
-  "Return non-nil if STATE is a vector representing lexer state."
-  (and (vectorp state)
-       (= (length state) 8)
-       (numberp (aref state 0))
-       (numberp (aref state 1))
-       (vectorp (aref state 2))
-       ;; value not tested
-       (booleanp (aref state 4))
-       (listp (aref state 5))
-       (booleanp (aref state 6))
-       (booleanp (aref state 7))))
-
 ;; Use `vconcat' to copy previous state.
 
 (defsubst jove-start (state)
@@ -390,56 +383,22 @@ Push the warning into the list `jove--warnings'."
   (jove-warn (point) (1+ (point)) "unexpected char")
   (forward-char))
 
-(defun jove-raise (type start end &optional message)
-  "Signal error of TYPE with an argument alist of START, END and MESSAGE."
-  (signal type (if message
-                   `((start ,start) (end ,end) (message, message))
-                 `((start ,start) (end ,end)))))
-
 ;; http://nullprogram.com/blog/2017/01/30/
 ;; Builting a list and using `nreverse' is the correct way to build a
 ;; list in reverse. `nreverse' is a very fast C builtin function.
 
 (defun jove-collect-string ()
-  "Convert `jove--string-buffer', a list of chars, to a string.
-Reverses the list before converting."
+  "Convert `jove--string-buffer', a list of strings, to a string.
+Reverse the list before converting."
   (if jove--string-buffer
       (prog1 ;; Wouldn't `concat' work?
-          (apply #'string (nreverse jove--string-buffer))
+          (apply #'concat (nreverse jove--string-buffer))
         (setq jove--string-buffer nil))
     ""))
 
-(defsubst jove-add-to-string (char)
-  "Add CHAR to `jove--string-buffer'."
-  (push char jove--string-buffer))
-
-;;; Helper Predicate Functions
-
-;; Taken from `js2-mode-identifier-start-p'
-(defun jove-identifier-start-p (char)
-  "Is CHAR a valid start to an ES5 Identifier?
-See http://es5.github.io/#x7.6"
-  (or
-   (memq char '(?$ ?_))
-   (memq (get-char-code-property char 'general-category)
-         ;; Letters
-         '(Lu Ll Lt Lm Lo Nl))))
-
-;; Taken from `js2-mode-identifier-part-p'
-(defun jove-identifier-part-p (char)
-  "Is CHAR a valid part of an ES5 Identifier?
-See http://es5.github.io/#x7.6"
-  (or
-   (memq char '(?$ ?_ ?\u200c  ?\u200d))
-   (memq (get-char-code-property char 'general-category)
-         '(;; Letters
-           Lu Ll Lt Lm Lo Nl
-              ;; Combining Marks
-              Mn Mc
-              ;; Digits
-              Nd
-              ;; Connector Punctuation
-              Pc))))
+(defsubst jove-add-to-string (chunk)
+  "Add CHUCK to `jove--string-buffer'."
+  (push chunk jove--string-buffer))
 
 ;;; Lexer Utility Functions - Movement
 
@@ -468,7 +427,7 @@ Otherwise signal `jove-unexpected-character-error'."
     (jove-unexpected-char)))
 
 (defun jove-skip-line-comment (state)
-  "Skip line comment and run abnormal comment hook."
+  "Skip line comment and run comment hook."
   (let ((start (point)))
     (if (search-forward "\n" nil t)
         (jove-set-newline-before state t)
@@ -628,16 +587,14 @@ Otherwise signal `jove-unexpected-character-error'."
 
 (defun jove-read-token-dot (state)
   "Read a token starting with a period."
-  (let ((next (jove-peek-char)))
-    (cond ((and (characterp next)       ; Protect from end of buffer.
-                (<= ?0 next ?9))
-           (jove-read-number state t))
-          ((and (eq ?. next) (eq ?. (jove-peek-char 2))) ; ...
-           (forward-char 3)             ; Why not `jove-finish-op'?
-           (jove-finish-token state jove-ELLIPSIS))
-          (t
-           (forward-char)
-           (jove-finish-token state jove-DOT)))))
+  (cond ((jove-eat-re ".[0-9]+\\(?:[eE][-+]?[0-9]+\\)?")
+         (jove-finish-token state jove-NUM))
+        ((and (eq ?. (jove-peek-char)) (eq ?. (jove-peek-char 2))) ; ...
+         (forward-char 3)             ; Why not `jove-finish-op'?
+         (jove-finish-token state jove-ELLIPSIS))
+        (t
+         (forward-char)
+         (jove-finish-token state jove-DOT))))
 
 (defun jove-read-token-slash (state)
   "Read a token starting with a ?\/."
@@ -721,69 +678,9 @@ Otherwise signal `jove-unexpected-character-error'."
           (t                            ; = !
            (jove-finish-op state (if (eq ?= first) jove-EQ jove-PREFIX) 1)))))
 
-(defun jove-buffer-to-number (start end radix)
+(defsubst jove-buffer-to-number (start end radix)
   "Attempt to read a number from buffer from START to END in RADIX."
   (string-to-number (buffer-substring-no-properties start end) radix))
-
-(defun jove-read-number (state &optional starts-with-dot)
-  "Read JavaScript number from the buffer.
-STARTS-WITH-DOT indicates the previous character was a period."
-  ;; Inputs: '.' or /[0-9]*/
-  ;; Attempt to parse as either integer, float, or possible octal.
-  (let ((start (point))
-        (octal (eq ?0 (char-after)))) ; Would we ever get a zero
-    (when (and (not starts-with-dot)  ; to this function?
-               ;; Yes we can, `jove-read-zero' passes to this function
-               ;; if the number starts with a zero and is not a
-               ;; a literal using "0b, 0o, 0x" syntax.
-               (not (jove-eat-re jove-decimal-re)))
-      (jove-raise 'jove-number-invalid-error (jove-start state) (point)))
-    (when (and octal (= (point) (1+ start))) ; A single ?0
-      (setq octal nil))                 ; Could a number that starts
-    (when (and (eq ?\. (char-after))    ; with a dot fall though?
-               (not octal))
-      (forward-char)
-      (jove-eat-re jove-decimal-re)) ; (jove-eat-re "[0-9]+\\([eE][-+]?[0-9]+\\)?")
-    (when (and (memq (char-after) '(?e ?E))
-               (not octal))
-      (forward-char)
-      (when (memq (char-after) '(?+ ?-))
-        (forward-char))
-      (when (null (jove-eat-re jove-decimal-re))
-        (jove-warn (jove-start state) (point) "Invalid float exponent")))
-    (jove-finish-token state jove-NUM)
-    (when (and (char-after)           ; Protect regex search from nil.
-               (jove-identifier-part-p (char-after)))
-      ;; If an identifier is found afer a number push a warning, though
-      ;; still parse it as an identifier. Maybe change in the future.
-      (let ((start (point)))
-        (save-excursion
-          (skip-syntax-forward "w_")
-          (jove-warn start (point) "Unexpected identifier directly after number"))))))
-
-(defun jove-read-zero (state)
-  "Read a token starting with a ?0."
-  (let ((next (jove-peek-char 1)))
-    (if (memq next '(?x ?X ?o ?O ?b ?B)) ; 0b, 0o, 0x, etc.
-        (progn
-          (forward-char 2)
-          (cond
-           ((memq next '(?x ?X))
-            (jove-eat-re jove-hexadecimal-re))
-           ((memq next '(?o ?O))
-            (jove-eat-re jove-octal-re))
-           ((memq next '(?b ?B))
-            (jove-eat-re jove-binary-re)))
-          (when (and (char-after)           ; Protect regex search from nil.
-                     (jove-identifier-part-p (char-after)))
-            ;; If an identifier is found afer a number push a warning, though
-            ;; still parse it as an identifier. Maybe change in the future.
-            (let ((start (point)))
-              (save-excursion
-                (skip-syntax-forward "w_")
-                (jove-warn start (point) "Unexpected identifier directly after number"))))
-          (jove-finish-token state jove-NUM))
-      (jove-read-number state nil))))
 
 (defun jove-read-code-point ()
   "Read Unicode escape from buffer.
@@ -879,7 +776,7 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
           (jove-warn (jove-start state) (point) "Missing regex delimiter")
           (throw 'regexp nil))))))
   (jove-finish-token state jove-REGEXP)
-  (jove-set-face (jove-start state) (point) font-lock-string-face))
+  (jove-set-face* state font-lock-string-face))
 
 (defun jove-read-regexp-extras (state)
   "Read regular expression with extra fontifications."
@@ -922,7 +819,7 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
           (if (jove-read-regexp-class)
               (push (list  (1- (point)) (point) face) fontifies)
             ;; Hit eol or eof, finish and warn.
-            (jove-warn (jove-start state) (point) "Missing regex delimiter.")
+            (jove-warn (jove-start state) (point) "missing regex delimiter")
             (throw 'regexp 'nil)))
          ;; Found paren grouping construct.
          ((memq char '(?\( ?\) ?^ ?$ ?* ?+ ?? ?. ?|))
@@ -951,9 +848,9 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
          ;; Hit eol or eof, signal error.
          (t
           (setq looking nil)
-          (jove-warn (jove-start state) (point) "Missing regular expression closing delimiter")))))
+          (jove-warn (jove-start state) (point) "missing regex delimiter")))))
     (jove-finish-token state jove-REGEXP)
-    (jove-set-face (jove-start state) (point) font-lock-string-face)
+    (jove-set-face* state font-lock-string-face)
     (dolist (f fontifies)
       (apply #'jove-set-face f))))
 
@@ -978,7 +875,7 @@ delimiter."
       (cond
        ;; Found escape.
        ((eq ?\\ char)
-        (jove-read-escape-char nil))
+        (goto-char (+ (point) 2)))
        ;; Found closing delimiter, exit the loop.
        ((eq punc char)
         (forward-char)
@@ -988,7 +885,7 @@ delimiter."
         (setq looking nil)
         (jove-warn (jove-start state) (point) "Missing string closing delimiter")))))
   (jove-finish-token state jove-STRING)
-  (jove-set-face (jove-start state) (point) font-lock-string-face))
+  (jove-set-face* state font-lock-string-face))
 
 (defun jove-string-builder (list)
   "Return a string built from a LIST of strings."
@@ -1008,10 +905,10 @@ delimiter."
               (progn
                 (forward-char)
                 (jove-finish-token state jove-BACKQUOTE)
-                (jove-set-face (jove-start state) (jove-end state) font-lock-string-face)
+                (jove-set-face* state font-lock-string-face)
                 (throw 'token nil))
             (jove-finish-token state jove-TEMPLATE)
-            (jove-set-face (jove-start state) (jove-end state) font-lock-string-face)
+            (jove-set-face* state font-lock-string-face)
             (throw 'token nil)))
          ((eq ?\$ char)
           (if (eq ?\{ (jove-peek-char))
@@ -1022,7 +919,7 @@ delimiter."
                     (jove-finish-token state jove-DOLLAR-BRACE-L)
                     (throw 'token nil))
                 (jove-finish-token state jove-TEMPLATE)
-                (jove-set-face (jove-start state) (jove-end state) font-lock-string-face)
+                (jove-set-face* state font-lock-string-face)
                 (throw 'token nil))
             ;; Its possible to catch a single '$' which is part of the
             ;; literal template string. So it is necessary to always
@@ -1050,22 +947,18 @@ delimiter."
 (defun jove-read-word-internal (state)
   "Read ECMAScript Identifier."
   (jove-set-contains-esc state nil)
-  (let (word
-        chunk
+  (let (chunk
         invalid
         (looking t)
         (start (point)))
-    ;; `jove-identifier-start-p' was already varified for a regular
-    ;; character. Need to check for code point escapes.
     (when (eq ?\\ (char-after))
       (setq chunk (jove-read-word-escape state))
       (setq invalid (or invalid
                         (not chunk)
-                        (not (jove-identifier-start-p chunk))))
+                        (not (eq ?w (char-syntax chunk)))))
       (if invalid
           (jove-warn start (point) "Invalid identifier start character")
-        ;; Should I use the string builder here?
-        (push (string chunk) word))) ; Here chunk is a character
+        (jove-add-to-string (string chunk)))) ; Here chunk is a character.
     (setq start (point))
     (while looking
       (cond
@@ -1074,23 +967,23 @@ delimiter."
         (setq chunk (jove-read-word-escape state))
         (if (not chunk)
             (setq invalid t)
-          ;; regexp func protected by above if condition
-          (when (not (jove-identifier-part-p chunk))
+          ;; `char-syntax' protected by above if condition.
+          (when (not (memq (char-syntax chunk) '(?w ?_)))
             (setq invalid t)
             (jove-warn start (point) "Invalid identifier character")))
         (unless invalid
-          (push (string chunk) word)))
+          (jove-add-to-string (string chunk))))
        ((< 0 (skip-syntax-forward "w_"))
         (unless invalid
-          (push (buffer-substring-no-properties start (point)) word)))
+          (jove-add-to-string (buffer-substring-no-properties start (point)))))
        (t
         (setq looking nil)))
       (setq start (point)))
-    ;; If unable to properly parse an escape return nil,
-    ;; the word is still moved over. Warning are added
-    ;; and the word can not be considered a keyword.
+    ;; If unable to properly parse an escape return nil, the word is
+    ;; still moved over. A warning is added and the word cannot be
+    ;; considered a keyword.
     (unless invalid
-      (apply #'concat (nreverse word)))))
+      (jove-collect-string))))
 
 (defun jove-read-word (state)
   "Read from buffer an ECMAScript Identifier Name or Keyword."
@@ -1103,7 +996,7 @@ delimiter."
                      jove-NAME)))
     (jove-finish-token state type word)
     (when (jove-tt-keyword type)
-      (jove-set-face (jove-start state) (point) font-lock-keyword-face))))
+      (jove-set-face* state font-lock-keyword-face))))
 
 (defun jove-read-token (state char)
   "Read token using STATE with supplied CHAR."
@@ -1122,9 +1015,22 @@ delimiter."
    ((eq ?: char) (jove-finish-punc state jove-COLON))
    ((and (eq ?\` char) (<= 6 jove-ecma-version))
     (jove-finish-punc state jove-BACKQUOTE)
-    (jove-set-face (jove-start state) (jove-end state) font-lock-string-face))
-   ((eq ?0 char) (jove-read-zero state))
-   ((<= ?1 char ?9)  (jove-read-number state nil))
+    (jove-set-face* state font-lock-string-face))
+   ((eq ?0 char)
+    (let ((next (jove-peek-char 1)))
+      (cond
+       ((memq next '(?x ?X))
+        (forward-char 2) (jove-eat-re jove-hexadecimal-re))
+       ((memq next '(?o ?O))
+        (forward-char 2) (jove-eat-re jove-octal-re))
+       ((memq next '(?b ?B))
+        (forward-char 2) (jove-eat-re jove-binary-re))
+       (t
+        (jove-eat-re jove-number-re)))
+      (jove-finish-token state jove-NUM)))
+   ((<= ?1 char ?9)
+    (jove-eat-re jove-number-re)
+    (jove-finish-token state jove-NUM))
    ((or (eq ?\' char) (eq ?\" char)) (jove-read-string state char))
    ((eq ?\/ char) (jove-read-token-slash state))
    ((memq char '(?* ?%)) (jove-read-token-mult-modulo-exp state char))
@@ -1136,7 +1042,7 @@ delimiter."
    ((eq ?~ char) (jove-finish-op state jove-PREFIX 1))
    (t
     ;; Skip and try again.
-    (jove-warn (point) (1+ (point)) "Unexpected character")
+    (jove-warn (point) (1+ (point)) "unexpected character")
     (forward-char)
     (jove-next-token state))))
 
@@ -1157,12 +1063,11 @@ delimiter."
       (jove-finish-token state jove-EOF))
      ((jove-ctx-override ctx)
       (funcall (jove-ctx-override ctx) state))
-     ((or (jove-identifier-start-p char)
-          (eq ?\\ char))
+     ((or (memq (char-syntax char) '(?w ?\\)))
       (jove-read-word state))
      (t
       (jove-read-token state char)))
-    state))                             ; Return lexer state vector.
+    state))                             ; Return a token vector.
 
 (provide 'jove-lexer)
 

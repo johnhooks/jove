@@ -279,17 +279,9 @@
 (jove-deftest-lexer keyword-unicode-escape
   "\\u0073witch" jove-SWITCH :length 11 :value "switch")
 
-;; (jove-deftest-lexer no-keyword-after-dot
-;;   ".switch" jove-NAME :start 2 :length 6 :depth 2 :value "switch")
-
 (jove-deftest-lexer no-keyword-escapes-ecma-5-and-below
   "\\u0073witch" jove-NAME :length 11 :value "switch"
   :bind ((jove-ecma-version 5)))
-
-;;; Name & Identifier Errors
-
-;; (jove-deftest-lexer-err unexpected-character-error
-;;   "foo @" 'jove-unexpected-character-error)
 
 ;;; Name & Identifier Warnings
 
@@ -352,17 +344,6 @@
 (jove-deftest-lexer float-start-with-dot
   ".65536e5" jove-NUM :length 8)
 
-;;; Number Warnings
-
-(jove-deftest-lexer-warning float-missing-exponent
-  "6.5536e foo" :start 1 :end 8)
-
-(jove-deftest-lexer-warning float-missing-exponent-with-sign
-  "6.5536e- foo" :start 1 :end 9)
-
-(jove-deftest-lexer-warning identifier-after-number
-  "65536foo" :start 6 :end 9)
-
 ;;; Strings
 
 (jove-deftest-lexer string-single-quotes
@@ -395,13 +376,6 @@
 (jove-deftest-lexer-warning string-missing-delimiter
   "\"foo bar baz" :start 1 :end 13)
 
-(jove-deftest-lexer-warning string-octal-in-strict
-  "\"foo \\42ar\"" :start 6 :end 9
-  :bind ((jove--strict t)))
-
-(jove-deftest-lexer-warning string-invalid-hex-escape
-  "\"foo \\x6g\"" :start 6 :end 9)
-
 ;;; Template Strings
 
 (jove-deftest-lexer template-basic
@@ -417,10 +391,6 @@
   "`foo \\u{62}ar`" jove-TEMPLATE :length 12 :start 2 :depth 2)
 
 ;;; Template String Warnings
-
-;; (jove-deftest-lexer-err template-invalid-below-ecma-6
-;;   "`foo bar`" 'jove-unexpected-character-error
-;;   :bind ((jove-ecma-version 5)))
 
 (jove-deftest-lexer-warning template-invalid-octal
   "`foo \\42ar`" :start 6 :end 9)
@@ -507,7 +477,7 @@
         NEW
         THIS
         SUPER
-        ;; CLASS                           ; FIXME:
+        CLASS                           ; FIXME:
         EXTENDS
         ;; EXPORT                          ; FIXME:
         ;; IMPORT                          ; FIXME:
@@ -519,23 +489,6 @@
         TYPEOF
         VOID
         DELETE))
-
-;; Comments
-
-;; (jove-deftest-lexer single-line-comment
-;;   "foo // bar\n" jove-COMMENT :length 7 :start 5 :depth 2)
-
-;; (jove-deftest-lexer single-line-comment-eof
-;;   "foo // bar" jove-COMMENT :length 6 :start 5 :depth 2)
-
-;; (jove-deftest-lexer multi-line-comment
-;;   "foo /*\n  bar  \n*/\n" jove-COMMENT :length 13 :start 5 :depth 2)
-
-;; (jove-deftest-lexer multi-line-comment-eof
-;;   "foo /*\n  bar  \n*/" jove-COMMENT :length 13 :start 5 :depth 2)
-
-;; (jove-deftest-lexer multi-line-on-single-line-comment
-;;   "foo /*  bar  */\n" jove-COMMENT :length 11 :start 5 :depth 2)
 
 ;;; Comment Errors
 

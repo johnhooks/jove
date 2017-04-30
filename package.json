@@ -1,0 +1,22 @@
+{
+  "name": "jove-mode",
+  "version": "0.1.0",
+  "description": "An Emacs JavaScript Mode",
+  "main": "bin/build-identifiers.js",
+  "scripts": {
+    "build": "node bin/build-identifiers.js > jove-identifier.el"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnhooks/jove.git"
+  },
+  "author": "John Hooks",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/johnhooks/jove/issues"
+  },
+  "homepage": "https://github.com/johnhooks/jove#readme",
+  "dependencies": {
+    "unicode-9.0.0": "^0.7.4"
+  }
+}
