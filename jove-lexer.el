@@ -49,16 +49,6 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
         end (max (point-min) end))
   (push (vector start end face) jove--fontifications))
 
-(defsubst jove-token-set-face (token face)
-  "Queue TOKEN region for fontification using FACE."
-  ;;  `jove-start' is not defined yet here.
-  (jove-set-face (jove-start token) (jove-end token) face))
-
-(defsubst jove-node-set-face (node face)
-  "Queue NODE region for fontification using FACE."
-  ;;  `jove-start' is not defined yet here.
-  (jove-set-face (aref (car (car node)) 0) (aref (car (car node)) 1) face))
-
 (defsubst jove-set-face* (vec face)
   "Queue region for fontification using FACE.
 Use location data in `jove-start' and `jove-end' of VEC."
@@ -899,10 +889,6 @@ delimiter."
         (jove-warn (jove-start state) (point) "Missing string closing delimiter")))))
   (jove-finish-token state jove-STRING)
   (jove-set-face* state font-lock-string-face))
-
-(defun jove-string-builder (list)
-  "Return a string built from a LIST of strings."
-  (eval `(concat ,@list)))
 
 (defun jove-read-tmpl-token (state)
   "Read template string tokens."
