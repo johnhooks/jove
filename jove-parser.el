@@ -267,9 +267,11 @@ used.  Unless the error TYPE is supplied throw a `jove-parse-error'."
     (signal (or type 'jove-parse-error)
             (list (jove-format-error start end message) start end))))
 
-(defun jove-unexpected (&optional message-key)
-  "Signal an unexpected token parse error."
-  (let ((message (gethash message-key jove-messages)))
+(defun jove-unexpected (&optional key)
+  "Signal an unexpected token parse error.
+If KEY is provided attempt to look up the message in `jove-messages'."
+  (let ((message (gethash key jove-messages)))
+    (jove-set-face* (jove-token) 'js2-error)
     (jove-signal (or message
                 (format "unexpected token: %s" (jove-tt-label (jove-tt (jove-token))))))))
 
@@ -288,18 +290,6 @@ If the test passes consume the token as a side effect."
     (jove-next)
     t))
 
-(defun jove-expect (tt)
-  "Expect the current token to be of the type TT.
-If the test passes consumed the token as a side effect, otherwise
-throw an error."
-  (if (eq tt (jove-tt (jove-token)))
-      (jove-next)
-    (let ((expected (jove-tt-label tt))
-          (found (if (jove-is jove-NAME)
-                     (jove-value (jove-token))
-                   (jove-tt-label (jove-tt (jove-token))))))
-      (jove-signal (format "expected '%s' found '%s'" expected found)))))
-
 (defun jove-after-trailing-comma-p (tt &optional not-next)
   "Return non-nil if the current token is of the type TT.
 Advance to next token, unless NOT-NEXT."
@@ -310,7 +300,8 @@ Advance to next token, unless NOT-NEXT."
     t))
 
 (defun jove-is-contextual (name &optional token)
-  "Test whether current token is a contextual keyword NAME."
+  "Test whether current token is a contextual keyword NAME.
+Optionally test against TOKEN if provided."
   (and (eq jove-NAME (jove-tt (or token (jove-token))))
        (string-equal name (jove-value (or token (jove-token))))))
 
@@ -326,7 +317,7 @@ Advance to next token, unless NOT-NEXT."
       (jove-newline-before (jove-token))))
 
 (defun jove-semicolon (node)
-  "Consume a semicolon or, if allowed, pretend one is there.
+  "Consume a semicolon or if allowed pretend one is there.
 Return the value of the last sexp in BODY.  Though if unable to
 eat a semicolon, flag next statement as junk."
   (declare (indent 0))
@@ -368,6 +359,39 @@ fontified with `js2-error' face."
     (jove-node-set-prop node :junk t)
     (jove-set-error nil))
   node)
+
+;;; Helper Macros
+
+(defmacro jove-expect (tt &rest recover)
+  "Expect the current token to be of the type TT.
+If the test passes consumed the token as a side effect, if the test fails
+evaluate RECOVER if provided, otherwise throw an error."
+  (declare (indent 1))
+  `(if (eq ,tt (jove-tt (jove-token)))
+       (jove-next)
+     (if ,recover
+         (progn ,@recover)
+       (let ((expected (jove-tt-label ,tt))
+          (found (if (jove-is jove-NAME)
+                     (jove-value (jove-token))
+                   (jove-tt-label (jove-tt (jove-token))))))
+         (jove-signal (format "expected '%s' found '%s'" expected found))))))
+
+(defmacro jove-parse-sequence (closing &rest body)
+  "Loop while looking for CLOSING token type.
+BODY is evaluated between `jove-COMMA' tokens, while allowing for
+empty expressions and trailing commas.  NOTE: The CLOSING token
+is not moved over."
+  (declare (indent 1))
+  `(progn
+     ;; Execute body once before beginning the loop.
+     (unless (memq (jove-tt (jove-token)) (list jove-COMMA ,closing))
+       ,@body)
+     (while (not (eq ,closing (jove-tt (jove-token))))
+       (jove-expect jove-COMMA)
+       (unless (or (jove-after-trailing-comma-p ,closing t)
+                   (eq jove-COMMA (jove-token)))
+         ,@body))))
 
 ;;; Expression Parsing Functions
 
@@ -486,7 +510,7 @@ Unless SAW-UNARY, build a binary expression when '**' is encountered."
       (setq expr (jove-parse-await)))
      ((jove-tt-prefix (jove-tt (jove-token)))
       (let ((node (jove-node-init (jove-start (jove-token))))
-            (update (eq jove-INC-DEC (jove-tt (jove-token)))))
+            (update (jove-is jove-INC-DEC)))
         (jove-node-set-prop node :prefix t)
         (jove-node-set-prop node :op (jove-value (jove-token)))
         (jove-next)
@@ -506,7 +530,7 @@ Unless SAW-UNARY, build a binary expression when '**' is encountered."
           (jove-next)
           (setq expr (jove-node-finish node 'update-expression))))))
     (if (and (not saw-unary)
-             (eq jove-STARSTAR (jove-tt (jove-token))))
+             (jove-is jove-STARSTAR))
         (jove-build-binary start-pos
                        expr
                        (jove-parse-maybe-unary nil)
@@ -684,22 +708,15 @@ flag CAN-BE-ARROW is non-nil.  A sequence is wrapped in
 ParenthesizedExpression.  Trailing commas and empty expressions
 are allowed."
   (let ((val nil)
-        (first t)
         (expr-list '())
         (inner-end-pos nil)
         (start-pos (jove-start (jove-token)))
         (inner-start-pos (progn (jove-next) (jove-start (jove-token)))))
-    (while (not (eq jove-PAREN-R (jove-tt (jove-token))))
-      (if first
-          (setq first nil)
-        (jove-expect jove-COMMA))
-      ;; Allow empty expressions and trailing commas.
-      (unless (or (jove-after-trailing-comma-p jove-PAREN-R t)
-                  (eq jove-COMMA (jove-tt (jove-token))))
-        (if (eq jove-ELLIPSIS (jove-tt (jove-token)))
-            (push (jove-parse-rest) expr-list)
-          (unless (jove-after-trailing-comma-p jove-PAREN-R t)
-            (push (jove-parse-maybe-assign nil) expr-list)))))
+    (jove-parse-sequence jove-PAREN-R
+      (push (if (eq jove-ELLIPSIS (jove-tt (jove-token)))
+                (jove-parse-rest)
+              (jove-parse-maybe-assign nil))
+            expr-list))
     (setq inner-end-pos (jove-start (jove-token)))
     (jove-expect jove-PAREN-R)
     ;; Return a ArrowFunctionExpression or ParenthesizedExpression.
@@ -780,21 +797,14 @@ are allowed."
 (defun jove-parse-object (&optional is-pattern)
   "Parse an object literal or binding pattern.
 Optionally if IS-PATTERN, parse as an ObjectPattern."
-  (let ((first t)
-        (start-pos nil)
+  (let ((start-pos nil)
         (prop nil)
         (prop-list '())
         (is-async nil)
         (is-generator nil)
         (node (jove-node-init)))
     (jove-next)                             ; Move over '{'
-    (while (not (jove-eat jove-BRACE-R))
-      (if first
-          (setq first nil)
-        (jove-expect jove-COMMA))
-      ;; If there is a trailing comma, or empty expression, do nothing
-      ;; and let the next round of the loop find the `jove-BRACE-R' or
-      ;; `jove-COMMA'.
+    (jove-parse-sequence jove-BRACE-R
       (unless (or (jove-after-trailing-comma-p jove-BRACE-R t)
                   (eq jove-COMMA (jove-tt (jove-token))))
         (setq prop (jove-node-init))
@@ -817,6 +827,7 @@ Optionally if IS-PATTERN, parse as an ObjectPattern."
         (jove-parse-property-value prop is-pattern is-generator is-async start-pos)
         (push (jove-node-finish prop 'property) prop-list)))
     (jove-add-children* node (nreverse prop-list))
+    (jove-next)                             ; Move over '}'
     (jove-node-finish node (if is-pattern 'object-pattern 'object-expression))))
 
 ;; TODO: Need a better way to flag different node options.
@@ -961,25 +972,19 @@ unless the body is contained in a brace block."
     (jove-add-child parent (jove-parse-block))))
 
 ;; TODO: Combine `jove-parse-expr-list' and `jove-parse-binding-list'
-(defun jove-parse-expr-list (close)
+(defun jove-parse-expr-list (closing)
   "Parse a comma seperated list of expressions.
-Return a list of nodes.  Advance parser over CLOSE, the token
+Return a list of nodes.  Advance parser over CLOSING, the token
 type which ends the list.  Always allow empty expressions and
 trailing commas."
   ;; NOTE: This function returns a list of nodes, NOT a node!
-  (let ((first t)
-        (expr-list '()))
-    (while (not (jove-eat close))
-      (if first
-          (setq first nil)
-        (jove-expect jove-COMMA))
-      ;; Skip trailing commas and empty expressions.
-      (unless (or (jove-after-trailing-comma-p close t)
-                  (eq jove-COMMA (jove-tt (jove-token))))
-        (push (if (eq jove-ELLIPSIS (jove-tt (jove-token)))
-                  (jove-parse-spread)
-                (jove-parse-maybe-assign))
-              expr-list)))
+  (let ((expr-list '()))
+    (jove-parse-sequence closing
+      (push (if (eq jove-ELLIPSIS (jove-tt (jove-token)))
+                (jove-parse-spread)
+              (jove-parse-maybe-assign))
+            expr-list))
+    (jove-next)                             ; Move over CLOSING.
     (nreverse expr-list)))
 
 (defun jove-parse-identifier (&optional liberal)
@@ -1115,21 +1120,13 @@ CLOSE is the token type which ends the list.  Always allow empty
 expressions and trailing commas.  Optionally ALLOW-NON-IDENTIFIER
 arguments to RestElement.  The boolean HIGHLIGHT flags to set
 variable name face."
-  (let ((first t)
-        (elts '()))
-    (while (not (jove-eat close))
-      (if first
-          (setq first nil)
-        ;; Perhaps if the comma is not there, we should pretend it is
-        ;; to prevent errors and just get an AST.
-        (jove-expect jove-COMMA))
-      ;; Skip trailing commas and empty expressions.
-      (unless (or (jove-after-trailing-comma-p close t)
-                  (eq jove-COMMA (jove-tt (jove-token))))
-        (push (if (eq jove-ELLIPSIS (jove-tt (jove-token)))
-                  (jove-parse-rest allow-non-identifier)
-                (jove-parse-maybe-default (jove-start (jove-token)) nil))
-              elts)))
+  (let ((elts '()))
+    (jove-parse-sequence close
+      (push (if (eq jove-ELLIPSIS (jove-tt (jove-token)))
+                (jove-parse-rest allow-non-identifier)
+              (jove-parse-maybe-default (jove-start (jove-token)) nil))
+            elts))
+    (jove-next)                             ; Move over ')'
     (nreverse elts)))
 
 (defun jove-parse-maybe-default (start-pos &optional left)
