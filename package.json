@@ -2,9 +2,9 @@
   "name": "jove-mode",
   "version": "0.1.0",
   "description": "An Emacs JavaScript Mode",
-  "main": "bin/build-identifiers.js",
+  "main": "bin/build-jove-identifier.js",
   "scripts": {
-    "build": "node bin/build-identifiers.js > jove-identifier.el"
+    "build": "node bin/build-jove-identifier.js > jove-identifier.el"
   },
   "repository": {
     "type": "git",
