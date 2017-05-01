@@ -28,31 +28,31 @@
     (goto-char 1)
   (let ((index 1)                       ; HACK
         (looping t)
-        (state (jove-next-token (jove-lex-state-make))))
+        (token (jove-next-token (jove-token-make))))
     (while looping
-      (if (or (eq jove-EOF (jove-tt state))
+      (if (or (eq jove-EOF (jove-tt token))
               (>= index depth))
           (setq looping nil)
-        (setq state (jove-next-token state)
+        (setq token (jove-next-token token)
               index (1+ index))))
-    (should (equal (aref vec 0)         ; start
-                   (aref state 0)))
-    (should (equal (aref vec 1)         ; end
-                   (aref state 1)))
-    (should (equal (aref vec 2)         ; type
-                   (aref state 2)))
-    (should (equal (aref vec 3)         ; value
-                   (aref state 3)))))
+    (should (equal (jove-start vec)         ; start
+                   (jove-start token)))
+    (should (equal (jove-end vec)           ; end
+                   (jove-end token)))
+    (should (equal (jove-tt vec)            ; type
+                   (jove-tt token)))
+    (should (equal (jove-value vec)         ; value
+                   (jove-value token)))))
 
 (defun jove-test-lexer-warn (start end)
   (goto-char 1)
   (let ((warning nil)
         (looping t)
-        (state (jove-next-token (jove-lex-state-make))))
+        (token (jove-next-token (jove-token-make))))
     (while looping
-      (if (eq jove-EOF (jove-tt state))
+      (if (eq jove-EOF (jove-tt token))
           (setq looping nil)
-        (setq state (jove-next-token state))))
+        (setq token (jove-next-token token))))
     (setq warning (car jove--warnings))
     (should (vectorp warning))
     (should (equal start (aref warning 0)))
@@ -72,7 +72,7 @@
   `(ert-deftest ,(intern (format "jove-test-lex-%s" name)) ()
      (jove-test-env ,content ,bind
                 #'(lambda ()
-                    (jove-test-lexer ,depth (vector ,start ,(+ start length) ,type ,value))))))
+                    (jove-test-lexer ,depth (vector 'jove-token ,start ,(+ start length) ,type ,value))))))
 
 (cl-defmacro jove-deftest-lexer-warning (name content &key start end bind)
   (declare (indent defun))
