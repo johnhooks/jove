@@ -4,7 +4,7 @@
 
 ;; Auther: John Hooks
 ;; URL: https://github.com/johnhooks/jove
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Keywords: languages, javascript
 
 ;; This file is part of Jove Mode.

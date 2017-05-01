@@ -49,21 +49,11 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
         end (max (point-min) end))
   (push (vector start end face) jove--fontifications))
 
-(defsubst jove-token-set-face (token face)
-  "Queue TOKEN region for fontification using FACE."
-  ;;  `jove-start' is not defined yet here.
-  (jove-set-face (aref token 0) (aref token 1) face))
-
-(defsubst jove-node-set-face (node face)
-  "Queue NODE region for fontification using FACE."
-  ;;  `jove-start' is not defined yet here.
-  (jove-set-face (aref (car (car node)) 0) (aref (car (car node)) 1) face))
-
 (defsubst jove-set-face* (vec face)
   "Queue region for fontification using FACE.
 Use location data in `jove-start' and `jove-end' of VEC."
   ;;  `jove-start' is not defined yet here.
-  (jove-set-face (aref vec 0) (aref vec 1) face))
+  (jove-set-face (jove-start vec) (jove-end vec) face))
 
 ;;; Token Types
 
@@ -281,7 +271,7 @@ pairs collected in OPTIONS."
 (defvar jove-F-EXPR (jove-ctx-make "function" :is-expr t))
 (defvar jove-Q-TMPL (jove-ctx-make "`" :is-expr t :preserve-space t :override #'jove-read-tmpl-token))
 
-;;; Lexer State
+;;; Token
 
 ;; Use `point' to track the current position of the lexer in the buffer.
 ;; The logic behind using `point', is the relative ease of use to apply
@@ -290,53 +280,67 @@ pairs collected in OPTIONS."
 ;; Unlike Acorn, this parser is working inside an Emacs buffer, in
 ;; which positions are between characters and start at 1
 
-(defun jove-lex-state-make ()
-  "Return a vector representing an initial lexer state."
-  (vector 1                             ; 0 start
-          1                             ; 1 end
-          jove-EOF                          ; 2 token type (tt)
-          nil                           ; 3 value
-          nil                           ; 4 newline-before
-          (jove-initial-ctx)                ; 5 ctx-stack
-          t                             ; 6 expr-allowed
-          nil))                         ; 7 contains-esc
+(defun jove-token-make ()
+  "Return a vector representing a token.
+Includes full lexer state data, which can be used as an argument
+to `jove-next-token' to resume tokenization."
+  (vector 'jove-token                       ; 0
+          1                             ; 1 start
+          1                             ; 2 end
+          jove-EOF                          ; 3 token type (tt)
+          nil                           ; 4 value
+          nil                           ; 5 newline-before
+          (jove-initial-ctx)                ; 6 ctx-stack
+          t                             ; 7 expr-allowed
+          nil))                         ; 8 contains-esc
 
-;; Use `vconcat' to copy previous state.
+;; NOTE: Use `vconcat' to copy previous state.
 
-(defsubst jove-start (state)
-  "Return the 'start' slot of the lexer STATE."
-  (aref state 0))
-(defsubst jove-set-start (state value)
-  "Set the 'start' slot of the lexer STATE to VALUE."
-  (aset state 0 value))
+(defun jove-token-p (object)
+  "Return t if OBJECT is a token."
+  (eq 'jove-token (aref object 0)))
 
-(defsubst jove-end (state)
-  "Return the 'end' slot of the lexer STATE."
-  (aref state 1))
-(defsubst jove-set-end (state value)
-  "Set the 'end' slot of the lexer STATE to VALUE."
-  (aset state 1 value))
+;;; NOTE: `start', `end', and `type' work on tokens and nodes.
 
-(defsubst jove-tt (state)
-  "Return the 'type' slot of the lexer STATE."
-  (aref state 2))
-(defsubst jove-set-tt (state value)
-  "Set the 'type' slot of the lexer STATE to VALUE."
-  (aset state 2 value))
+(defun jove-start (vec)
+  "Return the 'start' slot of the VEC."
+  (aref vec 1))
+(defun jove-set-start (vec value)
+  "Set the 'start' slot of the VEC to VALUE."
+  (aset vec 1 value))
 
-(defsubst jove-value (state)
-  "Return the 'value' slot of the lexer STATE."
-  (aref state 3))
-(defsubst jove-set-value (state value)
-  "Set the 'value' slot of the lexer STATE to VALUE."
-  (aset state 3 value))
+(defun jove-end (vec)
+  "Return the 'end' slot of the VEC."
+  (aref vec 2))
+(defun jove-set-end (vec value)
+  "Set the 'end' slot of the VEC to VALUE."
+  (aset vec 2 value))
 
-(defsubst jove-newline-before (state)
-  "Return the 'newline-before' slot of the lexer STATE."
-  (aref state 4))
-(defsubst jove-set-newline-before (state value)
-  "Set the 'newline-before' slot of the lexer STATE to VALUE."
-  (aset state 4 value))
+(defun jove-type (vec)
+  "Return the 'type' slot of the VEC."
+  (aref vec 3))
+(defun jove-set-type (vec value)
+  "Set the 'type' slot of the VEC to VALUE."
+  (aset vec 3 value))
+
+(defalias 'jove-tt 'jove-type)
+(defalias 'jove-set-tt 'jove-set-type)
+
+;;; Token Specific Getter and Setter Functions:
+
+(defsubst jove-value (token)
+  "Return the 'value' slot of the lexer TOKEN."
+  (aref token 4))
+(defsubst jove-set-value (token value)
+  "Set the 'value' slot of the lexer TOKEN to VALUE."
+  (aset token 4 value))
+
+(defsubst jove-newline-before (token)
+  "Return the 'newline-before' slot of the lexer TOKEN."
+  (aref token 5))
+(defsubst jove-set-newline-before (token value)
+  "Set the 'newline-before' slot of the lexer TOKEN to VALUE."
+  (aset token 5 value))
 
 ;; Quoted acorn/src/state.js
 ;;
@@ -344,31 +348,30 @@ pairs collected in OPTIONS."
 ;;    context to predict whether a regular expression is allowed in a
 ;;    given position."
 
-(defsubst jove-ctx-stack (state)
-  "Return the 'ctx-stack' slot of the lexer STATE."
-  (aref state 5))
-(defsubst jove-ctx-stack-push (state value)
-  "Push on to the 'ctx-stack' of the lexer STATE a VALUE."
-  (aset state 5 (cons value (aref state 5))))
-(defsubst jove-ctx-stack-pop (state)
-  "Pop the 'ctx-stack' of the lexer STATE."
-  (prog1
-      (car (aref state 5))
-    (aset state 5 (cdr (aref state 5)))))
+(defsubst jove-ctx-stack (token)
+  "Return the 'ctx-stack' slot of the lexer TOKEN."
+  (aref token 6))
+(defsubst jove-ctx-stack-push (token value)
+  "Push on to the 'ctx-stack' of the lexer TOKEN a VALUE."
+  (aset token 6 (cons value (aref token 6))))
+(defsubst jove-ctx-stack-pop (token)
+  "Pop the 'ctx-stack' of the lexer TOKEN."
+  (prog1 (car (aref token 6))
+    (aset token 6 (cdr (aref token 6)))))
 
-(defsubst jove-expr-allowed (state)
-  "Return the 'expr-allowed' slot of the lexer STATE."
-  (aref state 6))
-(defsubst jove-set-expr-allowed (state value)
-  "Set the 'expr-allowed' slot of the lexer STATE to VALUE."
-  (aset state 6 value))
+(defsubst jove-expr-allowed (token)
+  "Return the 'expr-allowed' slot of the lexer TOKEN."
+  (aref token 7))
+(defsubst jove-set-expr-allowed (token value)
+  "Set the 'expr-allowed' slot of the lexer TOKEN to VALUE."
+  (aset token 7 value))
 
-(defsubst jove-contains-esc (state)
-  "Return the 'contains-esc' slot of the lexer STATE."
-  (aref state 7))
-(defsubst jove-set-contains-esc (state value)
-  "Set the 'contains-esc' slot of the lexer STATE to VALUE."
-  (aset state 7 value))
+(defsubst jove-contains-esc (token)
+  "Return the 'contains-esc' slot of the lexer TOKEN."
+  (aref token 8))
+(defsubst jove-set-contains-esc (token value)
+  "Set the 'contains-esc' slot of the lexer TOKEN to VALUE."
+  (aset token 8 value))
 
 ;;; Utility Functions
 
@@ -886,10 +889,6 @@ delimiter."
         (jove-warn (jove-start state) (point) "Missing string closing delimiter")))))
   (jove-finish-token state jove-STRING)
   (jove-set-face* state font-lock-string-face))
-
-(defun jove-string-builder (list)
-  "Return a string built from a LIST of strings."
-  (eval `(concat ,@list)))
 
 (defun jove-read-tmpl-token (state)
   "Read template string tokens."
