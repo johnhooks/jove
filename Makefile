@@ -1,7 +1,6 @@
 # -*- Makefile -*-
 
-EMACS = /Applications/Emacs.app/Contents/MacOS/Emacs
-# EMACS = emacs
+EMACS = emacs
 
 # Compile with noninteractive and relatively clean environment.
 BATCHFLAGS = -batch --quick
