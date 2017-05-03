@@ -152,7 +152,9 @@ supply node TYPE."
 
 (defsubst jove-node-p (object)
   "Return t if OBJECT is a node."
-  (eq 'jove-node (aref object 0)))
+  (and (vectorp object)
+       (= 7 (length object))
+       (eq 'jove-node (aref object 0))))
 
 ;; NOTE: `start', `end', and `type' work on tokens and nodes.
 
@@ -1189,7 +1191,7 @@ declaration."
         (jove-parse-var-statement node kind)))
      ((eq jove-WHILE tt) (jove-parse-while-statement node))
      ((eq jove-WITH tt) (jove-parse-with-statement node))
-     ((eq jove-BRACE-L tt) (jove-parse-block))
+     ((eq jove-BRACE-L tt) (jove-parse-block node))
      ((eq jove-SEMI tt) (jove-parse-empty-statement node))
      ((eq jove-IMPORT tt) (jove-parse-import node))
      ((eq jove-EXPORT tt) (jove-parse-export node))
@@ -1392,13 +1394,14 @@ EXPRESSION is supplied by `jove-parse-statement'."
   (jove-semicolon
     (jove-finish node 'expression-statement)))
 
-(defun jove-parse-block ()
+(defun jove-parse-block (&optional node)
   "Return NODE as a block of statements."
-  (let ((node (jove-node-make)))
-    (jove-expect jove-BRACE-L)
-    (while (not (jove-eat jove-BRACE-R))
-      (jove-add-child node (jove-parse-statement t)))
-    (jove-finish node 'block-statement)))
+  (unless (jove-node-p node)
+    (setq node (jove-node-make)))
+  (jove-expect jove-BRACE-L)
+  (while (not (jove-eat jove-BRACE-R))
+    (jove-add-child node (jove-parse-statement t)))
+  (jove-finish node 'block-statement))
 
 (defun jove-parse-for (node initializer)
   "Return NODE as a regular 'for' statement.
