@@ -772,7 +772,6 @@ are allowed."
 Optionally if IS-PATTERN, parse as an ObjectPattern."
   (let ((start-pos nil)
         (prop nil)
-        (prop-list '())
         (is-async nil)
         (is-generator nil)
         (node (jove-node-make)))
@@ -797,7 +796,7 @@ Optionally if IS-PATTERN, parse as an ObjectPattern."
         (jove-set-children prop '())        ; Clear children.
         (jove-parse-property-name prop is-pattern))
       (jove-parse-property-value prop is-pattern is-generator is-async start-pos)
-      (jove-add-child node prop))
+      (jove-add-child node (jove-finish prop 'property)))
     (jove-next)                             ; Move over '}'
     (jove-finish node (if is-pattern 'object-pattern 'object-expression))))
 
@@ -952,9 +951,9 @@ unless the body is contained in a brace block."
 ;; TODO: Combine `jove-parse-expr-list' and `jove-parse-binding-list'
 (defun jove-parse-expr-list (node closing)
   "Parse a comma seperated list of expressions.
-Return a list of nodes.  Advance parser over CLOSING, the token
-type which ends the list.  Always allow empty expressions and
-trailing commas."
+Return NODE with parsed expressions added as children.  Advance
+parser over CLOSING, the token type which ends the list.  Always
+allow empty expressions and trailing commas."
   (jove-parse-sequence closing
     (jove-add-child node (if (jove-is jove-ELLIPSIS)
                          (jove-parse-spread)
@@ -1091,16 +1090,16 @@ The boolean HIGHLIGHT flags to set variable name face."
 ;; This function is used to parse function and method parameters.
 (defun jove-parse-binding-list (node closing  &optional allow-non-identifier)
   "Parse assignable list.
-CLOSING is the token type which ends the list.  Add binding
-expressions to NODE's children .  Always allow empty expressions
-and trailing commas.  Optionally ALLOW-NON-IDENTIFIER arguments
-to RestElement."
+Return NODE with parsed expressions added as children.  Move over
+CLOSING, the token type which ends the list.  Always allow empty
+expressions and trailing commas.  Optionally ALLOW-NON-IDENTIFIER
+arguments to RestElement."
   (jove-parse-sequence closing
     (jove-add-child node (if (jove-is jove-ELLIPSIS)
                          (jove-parse-rest allow-non-identifier)
                        (jove-parse-maybe-default (jove-start (jove-token)) nil))))
-  (jove-next)                               ; Move over closing delimiter.
-  node)
+  (jove-next)                               ; Move over CLOSING.
+  node)                                 ; Return NODE.
 
 (defun jove-parse-maybe-default (start-pos &optional left)
   "Parse assignment pattern around a given atom if possible.
@@ -1300,8 +1299,7 @@ The boolean IS-ASYNC flags an async function."
   "Return NODE as a 'switch' statement."
   (jove-next)
   (jove-add-child node (jove-parse-paren-expr))
-  (let (cases
-        current                         ; Current switch case.
+  (let (current                         ; Current switch case.
         is-case)
     (jove-expect jove-BRACE-L)
     (while (jove-is-not jove-BRACE-R)
@@ -1309,7 +1307,7 @@ The boolean IS-ASYNC flags an async function."
               (jove-is jove-DEFAULT))
           (progn
             (when current (jove-finish current 'switch-case))
-            (jove-add-child node(setq current (jove-node-make)))
+            (jove-add-child node (setq current (jove-node-make)))
             (jove-next)
             (if is-case
                 (jove-add-child current (jove-parse-expression))
@@ -1382,8 +1380,10 @@ KIND should be a symbol of either 'var, 'let or 'const."
 
 (defun jove-parse-labeled-statement (node maybe-name expr)
   "Return NODE as a labeled statement."
-  ;; TODO:
-  )
+  (jove-add-children node
+                 expr
+                 (jove-parse-statement t))
+  (jove-finish node 'labeled-statement))
 
 (defun jove-parse-expression-statement (node expression)
   "Return NODE as an expression statement.
