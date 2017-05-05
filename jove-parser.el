@@ -1638,8 +1638,10 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
           (when (jove-eat-contextual "as")
             (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
             (jove-add-child spec (jove-parse-identifier t)))
+          (jove-finish spec 'export-specifier)
           (jove-add-child specs spec))
-        (jove-next)))                       ; Move over '}'
+        (jove-next)                         ; Move over '}'
+        (jove-add-child node (jove-finish specs 'export-specifiers))))
     (when (jove-eat-contextual "from")
       (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
       (when (jove-is jove-STRING)
@@ -1649,8 +1651,58 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
 
 (defun jove-parse-import (node)
   "Return NODE as 'import' declaration."
-  ;; TODO:
-  )
+  (jove-next)
+  (if (jove-is jove-STRING)
+      (jove-add-child node (jove-parse-expr-atom))
+    (let ((specs (jove-parse-import-specifiers (jove-node-make))))
+      (jove-finish specs 'import-specifiers)
+      (jove-add-child node specs)
+      (when (jove-eat-contextual "from")
+        (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
+        (when (jove-is jove-STRING)
+          (jove-add-child node (jove-parse-expr-atom))))))
+  (jove-semicolon)
+  (jove-finish node 'import-declaration))
+
+(defun jove-parse-import-specifiers (node)
+  "Return NODE as a comma separated list of module imports."
+  (catch 'specifiers
+    (let (spec)
+      (when (jove-is jove-NAME)
+        ;; import defaultObject, {foo, bar as qux} from 'boo'
+        (setq spec (jove-node-make))
+        (jove-set-face* (jove-token) 'font-lock-variable-name-face)
+        (jove-add-child spec (jove-parse-identifier))
+        (jove-finish spec 'import-default-specifier)
+        (jove-add-child node spec)
+        (unless (jove-eat jove-COMMA)
+          (throw 'specifiers node)))
+      (when (jove-is jove-STAR)
+        (jove-set-face* (jove-token) 'font-lock-keyword-face)
+        (setq spec (jove-node-make))
+        (jove-next)                         ; Move over '*'
+        (when (jove-eat-contextual "as")
+          (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
+          (when (jove-is jove-NAME)
+            (jove-set-face* (jove-token) 'font-lock-variable-name-face)
+            (jove-add-child spec (jove-parse-identifier))))
+        (jove-finish spec 'import-namespace-specifier)
+        (jove-add-child node spec))
+      (when (jove-eat jove-BRACE-L)
+        (jove-parse-sequence jove-BRACE-R
+          (setq spec (jove-node-make))
+          (jove-add-child spec (jove-parse-identifier t))
+          (if (jove-eat-contextual "as")
+              (progn
+                (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
+                (when (jove-is jove-NAME)
+                  (jove-set-face* (jove-token) 'font-lock-variable-name-face)
+                  (jove-add-child spec (jove-parse-identifier))))
+            (jove-set-face* (jove-prev-token) 'font-lock-variable-name-face))
+          (jove-finish spec 'import-specifier)
+          (jove-add-child node spec))
+        (jove-next)))                       ; Move over '}'
+    node))                              ; Return NODE.
 
 (defun jove-parse ()
   "Run the Jove parser."
