@@ -424,8 +424,7 @@ The boolean flag NO-IN forbids the 'in' operator."
         (expr (jove-parse-expr-ops no-in)))
     (if (jove-is jove-QUESTION)
         (let ((node (jove-node-make start-pos)))
-          ;; Putting question mark position into ConditionalExpression node info slot.
-          ;; Getting weird I know. But should be helpful for indentation.
+          (jove-set-prop node :mark (jove-start (jove-token)))
           (jove-next)                       ; Move over '?'
           (jove-add-children node
                          expr
@@ -1723,6 +1722,26 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
                          10000.0)))
             (message "Parser finished in %0.3fsec" time)))
         (jove-apply-fontifications start-pos (point))))))
+
+(defun jove-find-node-at (node pos)
+  "Return NODE or a child of NODE at found at POS.
+Return nil if nothing is found."
+  (when (and (<= (jove-start node) pos)
+             (> (jove-end node) pos))
+    (or (jove-find-child-at (jove-children node) pos)
+        node)))
+
+(defun jove-find-child-at (children pos)
+  "Search for first child in CHILDREN to be within POS."
+  (let ((child (car children)))
+    (cond
+     ((null child)
+      nil)
+     ((and (<= (jove-start child) pos)
+           (> (jove-end child) pos))
+      (jove-find-node-at child pos))
+     (t
+      (jove-find-child-at (cdr children) pos)))))
 
 (provide 'jove-parser)
 
