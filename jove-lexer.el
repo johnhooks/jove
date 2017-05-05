@@ -995,7 +995,10 @@ delimiter."
                      jove-NAME)))
     (jove-finish-token state type word)
     (when (jove-tt-keyword type)
-      (jove-set-face* state font-lock-keyword-face))))
+      (if (memq type (list jove-TRUE jove-FALSE jove-UNDEFINED jove-NULL jove-THIS jove-SUPER))
+          (jove-set-face* state font-lock-builtin-face)
+        (jove-set-face* state font-lock-keyword-face))
+      )))
 
 (defun jove-read-token (state char)
   "Read token using STATE with supplied CHAR."

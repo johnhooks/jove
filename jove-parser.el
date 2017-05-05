@@ -266,6 +266,10 @@ If KEY is provided attempt to look up the message in `jove-messages'."
   "Return non-nil if the current token is of the type TT."
   (eq tt (jove-tt (jove-token))))
 
+(defun jove-is* (&rest tts)
+  "Return non-nil if the current token is one of the types TTS."
+  (memq (jove-tt (jove-token)) tts))
+
 (defsubst jove-is-not (tt)
   "Return non-nil if the current token is not of the type TT."
   (not (eq tt (jove-tt (jove-token)))))
@@ -303,17 +307,13 @@ Optionally test against TOKEN if provided."
       (eq jove-BRACE-R (jove-tt (jove-token)))
       (jove-newline-before (jove-token))))
 
-;; FIXME: Why is the node passed?
-(defun jove-semicolon (node)
+(defun jove-semicolon ()
   "Consume a semicolon or if allowed pretend one is there.
 Return the value of the last sexp in BODY.  Though if unable to
 eat a semicolon, flag next statement as junk."
-  (declare (indent 0))
-  (if (or (jove-eat jove-SEMI)
-          (jove-can-insert-semicolon-p))
-      node
-    (prog1 node
-      (jove-set-error :cannot-insert-semi))))
+  (unless (or (jove-eat jove-SEMI)
+              (jove-can-insert-semicolon-p))
+    (jove-set-error :cannot-insert-semi)))
 
 (defun jove-null-expression (pos)
   "Create a null expression.
@@ -1223,16 +1223,16 @@ Differentiate between the two using the token type TT."
     (if (jove-is-not jove-NAME)
         (jove-unexpected)
       (jove-add-child node (jove-parse-identifier))))
-  (jove-semicolon
-    (jove-finish node (if (eq jove-BREAK tt)
-                           'break-statement
-                         'continue-statement))))
+  (jove-semicolon)
+  (jove-finish node (if (eq jove-BREAK tt)
+                    'break-statement
+                  'continue-statement)))
 
 (defun jove-parse-debugger-statement (node)
   "Return NODE as a 'debugger' statement."
   (jove-next)
-  (jove-semicolon
-    (jove-finish node 'debugger-statement)))
+  (jove-semicolon)
+  (jove-finish node 'debugger-statement))
 
 (defun jove-parse-do-statement (node)
   "Return NODE as a 'do' statement."
@@ -1294,8 +1294,8 @@ The boolean IS-ASYNC flags an async function."
   (unless (or (jove-is jove-SEMI)
               (jove-can-insert-semicolon-p))
     (jove-add-child node (jove-parse-expression)))
-  (jove-semicolon
-    (jove-finish node 'return-statement)))
+  (jove-semicolon)
+  (jove-finish node 'return-statement))
 
 (defun jove-parse-switch-statement (node)
   "Return NODE as a 'switch' statement."
@@ -1331,8 +1331,8 @@ The boolean IS-ASYNC flags an async function."
   (jove-add-child node (if (jove-newline-before (jove-token))
                        (jove-null-expression (jove-end (jove-prev-token)))
                      (jove-parse-expression)))
-  (jove-semicolon
-    (jove-finish node 'throw-statement)))
+  (jove-semicolon)
+  (jove-finish node 'throw-statement))
 
 (defun jove-parse-try-statement (node)
   "Return NODE as a 'try' statement."
@@ -1355,8 +1355,8 @@ The boolean IS-ASYNC flags an async function."
 KIND should be a symbol of either 'var, 'let or 'const."
   (jove-next)
   (jove-parse-var node nil kind)
-  (jove-semicolon
-    (jove-finish node 'variable-declaration)))
+  (jove-semicolon)
+  (jove-finish node 'variable-declaration))
 
 (defun jove-parse-while-statement (node)
   "Return NODE as a 'while' statement."
@@ -1391,8 +1391,8 @@ KIND should be a symbol of either 'var, 'let or 'const."
   "Return NODE as an expression statement.
 EXPRESSION is supplied by `jove-parse-statement'."
   (jove-add-child node expression)
-  (jove-semicolon
-    (jove-finish node 'expression-statement)))
+  (jove-semicolon)
+  (jove-finish node 'expression-statement))
 
 (defun jove-parse-block (&optional node)
   "Return NODE as a block of statements."
@@ -1550,7 +1550,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
 
         (when (setq is-generator (jove-eat jove-STAR))
           ;; Highlight '*'.
-          (jove-set-face* (jove-prev-token) 'font-lock-function-name-face))
+          (jove-set-face* (jove-prev-token) 'font-lock-keyword-face))
         
         (jove-parse-property-name method)
         (jove-set-prop method :static
@@ -1599,8 +1599,53 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
 
 (defun jove-parse-export (node)
   "Return NODE as 'export' declaration."
-  ;; TODO:
-  )
+  (jove-next)
+  (cond
+   ((jove-eat jove-STAR)
+    (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
+    (jove-eat-contextual "from")
+    (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
+    (when (jove-is jove-STRING)
+      (jove-add-child node (jove-parse-expr-atom)))
+    (jove-finish-node node 'export-all-declaration))
+   ((jove-eat jove-DEFAULT)
+    (let (is-async)
+      (cond
+       ((or (jove-is jove-FUNCTION)
+            (setq is-async (jove-is-async-function)))
+        (let ((f-node (jove-node-make)))
+          (jove-next)
+          (when is-async (jove-next))
+          (jove-add-child node (jove-parse-function f-node t nil is-async))))
+       ((jove-is jove-CLASS)
+        (jove-add-child node (jove-parse-class (jove-node-make) t)))
+       (t
+        (jove-add-child node (jove-parse-maybe-assign))
+        (jove-semicolon))
+       (jove-finish node 'export-default-declaration))))
+   ((or (jove-is* jove-VAR jove-CONST jove-CLASS jove-FUNCTION)
+        (jove-is-let)
+        (jove-is-async-function))
+    (jove-add-child node (jove-parse-statement t))
+    (jove-finish node 'export-named-declaration))
+   (t
+    (when (jove-eat jove-BRACE-L)
+      (let ((spec nil)
+            (specs (jove-node-make)))       ; Specifiers
+        (jove-parse-sequence jove-BRACE-R
+          (setq spec (jove-node-make))
+          (jove-add-child spec (jove-parse-identifier t))
+          (when (jove-eat-contextual "as")
+            (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
+            (jove-add-child spec (jove-parse-identifier t)))
+          (jove-add-child specs spec))
+        (jove-next)))                       ; Move over '}'
+    (when (jove-eat-contextual "from")
+      (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
+      (when (jove-is jove-STRING)
+        (jove-add-child node (jove-parse-expr-atom))))
+    (jove-semicolon)
+    (jove-finish node 'export-named-declaration))))
 
 (defun jove-parse-import (node)
   "Return NODE as 'import' declaration."
