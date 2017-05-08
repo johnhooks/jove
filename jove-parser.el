@@ -1201,12 +1201,11 @@ declaration."
       (jove-next)
       (jove-parse-function-statement node t))
      (t
-      (let ((maybe-name (jove-value (jove-token)))
-            (expr (jove-parse-expression)))
+      (let ((expr (jove-parse-expression)))
         (if (and (eq jove-NAME tt)
                  (eq 'identifier (jove-type expr))
                  (jove-eat jove-COLON))
-            (jove-parse-labeled-statement node maybe-name expr)
+            (jove-parse-labeled-statement node expr)
           (jove-parse-expression-statement node expr)))))
     ;; Handle error if one exists, either way return NODE.
     (if (jove-error)
@@ -1379,7 +1378,7 @@ KIND should be a symbol of either 'var, 'let or 'const."
   (jove-next)
   (jove-finish node 'empty-statement))
 
-(defun jove-parse-labeled-statement (node maybe-name expr)
+(defun jove-parse-labeled-statement (node expr)
   "Return NODE as a labeled statement."
   (jove-add-children node
                  expr
@@ -1606,7 +1605,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
     (jove-set-face* (jove-prev-token) 'font-lock-keyword-face)
     (when (jove-is jove-STRING)
       (jove-add-child node (jove-parse-expr-atom)))
-    (jove-finish-node node 'export-all-declaration))
+    (jove-finish node 'export-all-declaration))
    ((jove-eat jove-DEFAULT)
     (let (is-async)
       (cond

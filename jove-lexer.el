@@ -400,7 +400,7 @@ Reverse the list before converting."
     ""))
 
 (defsubst jove-add-to-string (chunk)
-  "Add CHUCK to `jove--string-buffer'."
+  "Add CHUNK to `jove--string-buffer'."
   (push chunk jove--string-buffer))
 
 ;;; Lexer Utility Functions - Movement
