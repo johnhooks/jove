@@ -158,7 +158,7 @@ it to be reparsed when the buffer is selected."
 
 ;;; Before and After Change Hook Functions
 
-(defun jove--flush-caches (&optional start ignore)
+(defun jove--flush-caches (&optional start _ignore)
   ;; Don't know what the IGNORE argument is for.
   (setq start (or start (save-restriction (widen) (point-min))))
   (setq jove--cache-end (min jove--cache-end start)))

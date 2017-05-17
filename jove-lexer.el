@@ -23,6 +23,53 @@
 
 (require 'jove-vars)
 
+;; Buffer Local Global Scratch Variables
+
+(defvar-local jove--string-buffer nil
+  "List of string chunks built up while scanning various tokens.
+Private variable.")
+
+(defvar-local jove--token-cache '()
+  "List of previously lexed tokens.")
+
+;;; Regular Expressions
+
+(defconst jove-binary-re "[0-1]+"
+  "A regular expression to match a binary number.")
+
+(defconst jove-octal-re "[0-7]+"
+  "A regular expression to match an octal number.")
+
+(defconst jove-decimal-re "[0-9]+"
+  "A regular expression to match a decimal number.")
+
+(defconst jove-hexadecimal-re "[0-9A-Fa-f]+"
+  "A regular expression to match a hexadecimal number.")
+
+(defconst jove-number-re "[0-9]+\\(?:\\.[0-9]*\\)?\\(?:[eE][-+]?[0-9]+\\)?"
+  "A regular expression to match a integer or float number.")
+
+(defconst jove-escape-re (concat "\\([fnrtv]\\|x[0-9a-fA-F]\\{2\\}\\|c[A-Z]\\|"
+                             "u\\([0-9a-fA-F]\\{4\\}\\|{[0-9a-fA-F]\\{1,\\}}\\)\\)")
+  "A regular expression to match escape sequences.
+Does not include the backslash character.")
+
+(defconst jove-regexp-escape-re "[bBdDsSwW1-9]"
+  "A regular expression to match JavaScript regex escape sequences.
+Does not include the backslash character.")
+
+(defconst jove-string-single-quote-re "[^'\\\\\C-j]*"
+  "A regular expression for reading single quote strings.
+Match all characters excluding the escape character, single quote
+and newline.")
+
+(defconst jove-string-double-quote-re "[^\"\\\\\C-j]*"
+  "A regular expression for reading double quote strings.
+Match all characters excluding the escape character, double quote
+and newline.")
+
+;;; TODO: Move these to some where else.
+
 (defsubst jove-clear-face (start end)
   "Remove face properties from START to END."
   (remove-text-properties start end '(font-lock-face nil)))
