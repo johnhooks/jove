@@ -83,6 +83,10 @@
 
 ;;; Buffer Local Variables
 
+(defvar-local jove-mode-reparse-on-edit nil
+  "Boolean to flag automactic reparse on edit.
+Typical use is while debugging Jove Mode itself.")
+
 (defvar-local jove-ast nil
   "Parsed abstract syntax tree.")
 

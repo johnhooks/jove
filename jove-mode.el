@@ -137,6 +137,13 @@ it to be reparsed when the buffer is selected."
 
 ;;; Settings Toggle Function
 
+(defun jove-disable-parser ()
+  "Disable automatic syntax reparse on edit."
+  (interactive)
+  (when jove--idle-timer
+    (cancel-timer jove--idle-timer))
+  (setq jove-mode-reparse-on-edit nil))
+
 (defun jove-toggle-verbose ()
   "Toggle verbose parser messages."
   (interactive)
@@ -155,7 +162,6 @@ it to be reparsed when the buffer is selected."
         (not jove-fontify-regexp-grouping-chars))
   (jove--reparse t))
 
-
 ;;; Before and After Change Hook Functions
 
 (defun jove--flush-caches (&optional start _ignore)
@@ -167,7 +173,8 @@ it to be reparsed when the buffer is selected."
   "Schedule a new parse after buffer is edited.
 Buffer edit spans from BEG to END and is of length LEN."
   (setq jove--buffer-dirty-p t)
-  (jove--reset-timer))
+  (when jove-mode-reparse-on-edit
+    (jove--reset-timer)))
 
 ;;; The Mode
 
@@ -198,7 +205,8 @@ Buffer edit spans from BEG to END and is of length LEN."
   (setq-local electric-layout-rules
               '((?\; . after) (?\{ . after) (?\} . before)))
 
-  (jove--reparse t))
+  (when jove-mode-reparse-on-edit
+    (jove--reset-timer)))
 
 (provide 'jove-mode)
 
