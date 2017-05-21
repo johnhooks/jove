@@ -53,7 +53,9 @@
     (dolist (char jove-syntax-symbol-chars)
       (modify-syntax-entry char "_" table))
     table)
-  "Syntax table for `jove-mode'.")
+  "Syntax table for `jove-mode'.
+The word syntax class is used for JavaScript Identifier start characters,
+and the symbol syntax class is used for Identifier part characters ")
 
 ;;; Idle Reparse Timer Functions
 

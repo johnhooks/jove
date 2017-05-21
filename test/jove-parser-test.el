@@ -46,52 +46,54 @@
   (insert "  let foo = bar(qux")
   (jove-config)
   (jove-next)
-  (should (equal (jove-start (jove-token))
+  (should (equal jove--start
                  3))
-  (should (equal (jove-end (jove-token))
+  (should (equal jove--end
                  6))
-  (should (equal (jove-value (jove-token))
+  (should (equal jove--tt
+                 jove-LET))
+  (should (equal jove--value
                  "let")))
 
 (jove-deftest parser-node-init ()
-  "Test `jove-node-make' for correct return value."
+  "Test `jove-make-node' for correct return value."
   (insert "  let foo = bar(qux")
   (jove-config)
   (jove-next)
-  (should (equal (jove-node-make)
-                 '[jove-node 3 nil nil nil nil nil])))
+  (should (equal (jove-make-node)
+                 '(3 nil nil nil nil nil jove-node))))
 
 (jove-deftest parser-node-finish ()
   "Test `jove-node-first' for correct return value."
   (insert "  let foo = bar(qux")
   (jove-config)
   (jove-next)
-  (should (equal (jove-finish (prog1 (jove-node-make)
+  (should (equal (jove-finish (prog1 (jove-make-node)
                                  (jove-next))
                                'identifier)
-                 '[jove-node 3 6 identifier nil nil nil])))
+                 '(3 6 identifier nil nil nil jove-node))))
 
 (jove-deftest parser-add-child-adds-node-to-children ()
   "Test `jove-add-child' correctly adds child to parent."
-  (let* ((parent (jove-node-make 1 3 'foo))
-         (child (jove-node-make 4 7 'bar)))
+  (let* ((parent (jove-make-node 1 3 'foo))
+         (child (jove-make-node 4 7 'bar)))
     (jove-add-child parent child)
     (should (equal (car (jove-children parent))
                    child))))
 
 (jove-deftest parser-add-child-adds-parent-to-child ()
   "Test `jove-add-child' correctly adds reference to child's parent slot."
-  (let* ((parent (jove-node-make 1 3 'foo))
-         (child (jove-node-make 4 7 'bar)))
+  (let* ((parent (jove-make-node 1 3 'foo))
+         (child (jove-make-node 4 7 'bar)))
     (jove-add-child parent child)
     (should (equal (jove-parent child)
                    parent))))
 
 (jove-deftest parser-add-children ()
   "Test `jove-add-children' correctly adds children to parent."
-  (let* ((parent (jove-node-make 1 3 'foo))
-         (child-one (jove-node-make 4 7 'bar))
-         (child-two (jove-node-make 8 11 'qux)))
+  (let* ((parent (jove-make-node 1 3 'foo))
+         (child-one (jove-make-node 4 7 'bar))
+         (child-two (jove-make-node 8 11 'qux)))
     (jove-add-children parent child-one child-two)
     ;; NOTE: `jove-finish' has not been applied so children are in
     ;; reverse order.
@@ -102,9 +104,9 @@
 
 (jove-deftest parser-finish-reverses-children-list ()
   "Test `jove-add-children' correctly adds children to parent."
-  (let* ((parent (jove-node-make 1 3 'foo))
-         (child-one (jove-node-make 4 7 'bar))
-         (child-two (jove-node-make 8 11 'qux)))
+  (let* ((parent (jove-make-node 1 3 'foo))
+         (child-one (jove-make-node 4 7 'bar))
+         (child-two (jove-make-node 8 11 'qux)))
     (jove-add-children parent child-one child-two)
     (jove-finish* parent)
     ;; NOTE: `jove-finish' has not been applied so children are in

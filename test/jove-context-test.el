@@ -235,7 +235,7 @@
 (jove-deftest-ctx-stack function-prev-tt-before-expr-default
   ;; NOTE: jove-B-STAT must also be the current context.
   ;; NOTE: Using a dummy tt for testing.
-  (jove-FUNCTION (list jove-F-EXPR jove-B-STAT) :prev (jove-tt-make "dummy" :before-expr t)))
+  (jove-FUNCTION (list jove-F-EXPR jove-B-STAT) :prev (jove-make-tt "dummy" :before-expr t)))
 
 (jove-deftest-ctx-stack function-prev-tt-before-expr-semi
   (jove-FUNCTION (list jove-B-STAT) :prev jove-SEMI)

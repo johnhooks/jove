@@ -80,10 +80,10 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
   (with-silent-modifications
     (unless no-clear (jove-clear-face start end))
     (mapc #'(lambda (f)
-              (put-text-property (aref f 0) (aref f 1) 'font-lock-face (aref f 2)))
+              (apply #'put-text-property f))
           (nreverse jove--fontifications))  ; Allows applying over those previously pushed.
     (mapc #'(lambda (f)
-              (put-text-property (aref f 0) (aref f 1) 'font-lock-face font-lock-warning-face))
+              (put-text-property (nth 0 f) (nth 1 f) 'font-lock-face font-lock-warning-face))
           jove--warnings)
     (setq jove--fontifications nil
           jove--warnings nil)))     ; Probably shouldn't reset here.
@@ -94,13 +94,13 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
         start (max (point-min) start)
         end (min (point-max) end)
         end (max (point-min) end))
-  (push (vector start end face) jove--fontifications))
+  (push (list start end 'font-lock-face face) jove--fontifications))
 
-(defsubst jove-set-face* (vec face)
+(defsubst jove-set-face* (list face)
   "Queue region for fontification using FACE.
 Use location data in `jove-start' and `jove-end' of VEC."
   ;;  `jove-start' is not defined yet here.
-  (jove-set-face (jove-start vec) (jove-end vec) face))
+  (jove-set-face (jove-start list) (jove-end list) face))
 
 ;;; Token Types
 
@@ -127,88 +127,106 @@ Use location data in `jove-start' and `jove-end' of VEC."
 ;;    to know when parsing a label, in order to allow or disallow
 ;;    continue jumps to that label."
 
-(cl-defun jove-tt-make (label &key keyword before-expr starts-expr
-                          is-loop is-assign prefix postfix binop)
+(cl-defun jove-make-tt (label &key before-expr starts-expr prefix postfix binop
+                          is-keyword is-assign is-word is-atom)
   "Return a vector representing a token type."
   (vector label                         ; 0
-          keyword                       ; 1
-          before-expr                   ; 2
-          starts-expr                   ; 3
-          is-loop                       ; 4
-          is-assign                     ; 5
-          prefix                        ; 6
-          postfix                       ; 7
-          binop))                       ; 8
+          before-expr                   ; 1
+          starts-expr                   ; 2
+          prefix                        ; 3
+          postfix                       ; 4
+          binop                         ; 5
+          is-keyword                    ; 6
+          is-assign                     ; 7
+          is-word                       ; 8
+          is-atom))                     ; 9
 
 (defsubst jove-tt-label (tt)
   "Return the 'label' slot of the token type TT."
   (aref tt 0))
-(defsubst jove-tt-keyword (tt)
-  "Return the 'keyword' slot of the token type TT."
-  (aref tt 1))
 (defsubst jove-tt-before-expr (tt)
   "Return the 'before-expr' slot of the token type TT."
-  (aref tt 2))
+  (aref tt 1))
 (defsubst jove-tt-starts-expr (tt)
   "Return the 'starts-expr' slot of the token type TT."
-  (aref tt 3))
-(defsubst jove-tt-is-loop (tt)
-  "Return the 'is-loop' slot of the token type TT."
-  (aref tt 4))
-(defsubst jove-tt-is-assign (tt)
-  "Return the 'is-assign' slot of the token type TT."
-  (aref tt 5))
+  (aref tt 2))
 (defsubst jove-tt-prefix (tt)
   "Return the 'prefix' slot of the token type TT."
-  (aref tt 6))
+  (aref tt 3))
 (defsubst jove-tt-postfix (tt)
   "Return the 'postfix' slot of the token type TT."
-  (aref tt 7))
+  (aref tt 4))
 (defsubst jove-tt-binop (tt)
   "Return the 'binop' slot of the token type TT."
+  (aref tt 5))
+(defsubst jove-tt-is-keyword (tt)
+  "Return the 'is-keyword' slot of the token type TT."
+  (aref tt 6))
+(defsubst jove-tt-is-assign (tt)
+  "Return the 'is-assign' slot of the token type TT."
+  (aref tt 7))
+(defsubst jove-tt-is-word (tt)
+  "Return the 'is-word' slot of the token type TT."
   (aref tt 8))
+(defsubst jove-tt-is-atom (tt)
+  "Return the 'is-atom' slot of the token type TT."
+  (aref tt 9))
 
-(defun jove-binop-make (label prec)
+(defun jove-make-binop (label prec)
   "Return a vector representing a binary operator token type.
 LABEL should be a string and PREC a number for operator precedence."
-  (jove-tt-make label :before-expr t :binop prec))
+  (jove-make-tt label :before-expr t :binop prec))
 
-(defmacro jove-keyword-make (label &rest options)
+(defun jove-make-keyword (label &rest options)
   "Return a vector representing a keyword token type.
 LABEL should be a string and the remaining arguments are key value
 pairs collected in OPTIONS."
-  `(puthash (intern ,label)
-            (jove-tt-make ,label :keyword t ,@options)
-            jove-keywords))
+  (let ((tt (apply #'jove-make-tt (append `(,label :is-keyword t) options))))
+    (puthash (intern label) tt jove-keywords)))
+
+(defun jove-make-atom (label &rest options)
+  "Return a vector representing a keyword token type.
+LABEL should be a string and the remaining arguments are key value
+pairs collected in OPTIONS."
+  (let ((tt (apply #'jove-make-tt (append `(,label :is-atom t :starts-expr t)
+                                      options))))
+    (puthash (intern label) tt jove-keywords)))
+
+(defun jove-make-contextual (label &rest options)
+  "Return a vector representing a keyword token type.
+LABEL should be a string and the remaining arguments are key value
+pairs collected in OPTIONS."
+  (let ((tt (apply #'jove-make-tt (append `(,label :is-word t) options))))
+    (puthash (intern label) tt jove-keywords)))
 
 (defvar jove-keywords (make-hash-table :test 'equal)
   "Hash table to map keyword names to token types.")
 
-(defconst jove-NUM (jove-tt-make "num" :starts-expr t))
-(defconst jove-REGEXP (jove-tt-make "regexp" :starts-expr t))
-(defconst jove-STRING (jove-tt-make "string" :starts-expr t))
-(defconst jove-NAME (jove-tt-make "name" :starts-expr t))
-(defconst jove-BOB (jove-tt-make "bob"))        ; Beginning of the buffer.
-(defconst jove-EOB (jove-tt-make "eob"))        ; End of the buffer.
+(defconst jove-NUM (jove-make-tt "num" :starts-expr t))
+(defconst jove-REGEXP (jove-make-tt "regexp" :starts-expr t))
+(defconst jove-STRING (jove-make-tt "string" :starts-expr t))
+(defconst jove-NAME (jove-make-tt "name" :starts-expr t :is-word t))
+(defconst jove-BOB (jove-make-tt "bob"))        ; Beginning of the buffer.
+(defconst jove-EOB (jove-make-tt "eob"))        ; End of the buffer.
 
 ;;; Punctuation Token Types
 
-(defconst jove-BRACE-L (jove-tt-make "{" :before-expr t :starts-expr t))
-(defconst jove-BRACE-R (jove-tt-make "}"))
-(defconst jove-PAREN-L (jove-tt-make "(" :before-expr t :starts-expr t))
-(defconst jove-PAREN-R (jove-tt-make ")"))
-(defconst jove-BRACKET-L (jove-tt-make "[" :before-expr t :starts-expr t))
-(defconst jove-BRACKET-R (jove-tt-make "]"))
-(defconst jove-COMMA (jove-tt-make "," :before-expr t))
-(defconst jove-SEMI (jove-tt-make ";" :before-expr t))
-(defconst jove-COLON (jove-tt-make ":" :before-expr t))
-(defconst jove-DOT (jove-tt-make "."))
-(defconst jove-QUESTION (jove-tt-make "?" :before-expr t))
-(defconst jove-ARROW (jove-tt-make "=>" :before-expr t))
-(defconst jove-TEMPLATE (jove-tt-make "template"))
-(defconst jove-ELLIPSIS (jove-tt-make "..." :before-expr t))
-(defconst jove-DOLLAR-BRACE-L (jove-tt-make "${" :before-expr t :starts-expr t))
-(defconst jove-BACKQUOTE (jove-tt-make "`" :before-expr t))
+(defconst jove-BRACE-L (jove-make-tt "{" :before-expr t :starts-expr t))
+(defconst jove-BRACE-R (jove-make-tt "}"))
+(defconst jove-PAREN-L (jove-make-tt "(" :before-expr t :starts-expr t))
+(defconst jove-PAREN-R (jove-make-tt ")"))
+(defconst jove-BRACKET-L (jove-make-tt "[" :before-expr t :starts-expr t))
+(defconst jove-BRACKET-R (jove-make-tt "]"))
+(defconst jove-COMMA (jove-make-tt "," :before-expr t))
+(defconst jove-SEMI (jove-make-tt ";" :before-expr t))
+(defconst jove-COLON (jove-make-tt ":" :before-expr t))
+(defconst jove-DOT (jove-make-tt "."))
+(defconst jove-QUESTION (jove-make-tt "?" :before-expr t))
+(defconst jove-ARROW (jove-make-tt "=>" :before-expr t))
+(defconst jove-TEMPLATE (jove-make-tt "template"))
+(defconst jove-ELLIPSIS (jove-make-tt "..." :before-expr t))
+(defconst jove-DOLLAR-BRACE-L (jove-make-tt "${" :before-expr t :starts-expr t))
+(defconst jove-BACKQUOTE (jove-make-tt "`" :before-expr t))
 
 ;;; Operator Token Types
 
@@ -228,66 +246,80 @@ pairs collected in OPTIONS."
 ;;   binary operators with a very low precedence, that should result
 ;;   in AssignmentExpression nodes."
 
-(defconst jove-EQ (jove-tt-make "=" :before-expr t :is-assign t))
-(defconst jove-ASSIGN (jove-tt-make "_=" :before-expr t :is-assign t))
-(defconst jove-INC-DEC (jove-tt-make "++/--" :starts-expr t :prefix t :postfix t))
-(defconst jove-PREFIX (jove-tt-make "prefix" :before-expr t :starts-expr t :prefix t))
-(defconst jove-LOGICAL-OR (jove-binop-make "||" 1))
-(defconst jove-LOGICAL-AND (jove-binop-make "&&" 2))
-(defconst jove-BITWISE-OR (jove-binop-make "|" 3))
-(defconst jove-BITWISE-XOR (jove-binop-make "^" 4))
-(defconst jove-BITWISE-AND (jove-binop-make "&" 5))
-(defconst jove-EQUALITY (jove-binop-make "==/!=" 6)) ; == != === !==
-(defconst jove-RELATIONAL (jove-binop-make "</>" 7)) ; < > <= >=
-(defconst jove-BITSHIFT (jove-binop-make "<</>>" 8)) ; << >> >>>
-(defconst jove-PLUS-MIN (jove-tt-make "+/-"
-                              :binop 9
-                              :before-expr t
-                              :starts-expr t
-                              :prefix t))
-(defconst jove-MODULO (jove-binop-make "%" 10))
-(defconst jove-STAR (jove-binop-make "*" 10))
-(defconst jove-SLASH (jove-binop-make "/" 10))
-(defconst jove-STARSTAR (jove-tt-make "**" :before-expr t))
+(defconst jove-EQ (jove-make-tt "=" :before-expr t :is-assign t))
+(defconst jove-ASSIGN (jove-make-tt "_=" :before-expr t :is-assign t))
+(defconst jove-INC-DEC (jove-make-tt "++/--" :starts-expr t :prefix t :postfix t))
+(defconst jove-PREFIX (jove-make-tt "prefix" :before-expr t :starts-expr t :prefix t))
+(defconst jove-LOGICAL-OR (jove-make-binop "||" 1))
+(defconst jove-LOGICAL-AND (jove-make-binop "&&" 2))
+(defconst jove-BITWISE-OR (jove-make-binop "|" 3))
+(defconst jove-BITWISE-XOR (jove-make-binop "^" 4))
+(defconst jove-BITWISE-AND (jove-make-binop "&" 5))
+(defconst jove-EQUALITY (jove-make-binop "==/!=" 6)) ; == != === !==
+(defconst jove-RELATIONAL (jove-make-binop "</>" 7)) ; < > <= >=
+(defconst jove-BITSHIFT (jove-make-binop "<</>>" 8)) ; << >> >>>
+(defconst jove-PLUS-MIN (jove-make-tt "+/-" :binop 9 :before-expr t :starts-expr t :prefix t))
+(defconst jove-MODULO (jove-make-binop "%" 10))
+(defconst jove-STAR (jove-make-binop "*" 10))
+(defconst jove-SLASH (jove-make-binop "/" 10))
+(defconst jove-STARSTAR (jove-make-tt "**" :before-expr t))
 
 ;;; Keywords Token Types
 
-(defconst jove-BREAK (jove-keyword-make "break"))
-(defconst jove-CASE (jove-keyword-make "case" :before-expr t))
-(defconst jove-CATCH (jove-keyword-make "catch"))
-(defconst jove-CONTINUE (jove-keyword-make "continue"))
-(defconst jove-DEBUGGER (jove-keyword-make "debugger"))
-(defconst jove-DEFAULT (jove-keyword-make "default"))
-(defconst jove-DO (jove-keyword-make "do" :is-loop t :before-expr t))
-(defconst jove-ELSE (jove-keyword-make "else" :before-expr t))
-(defconst jove-FINALLY (jove-keyword-make "finally"))
-(defconst jove-FOR (jove-keyword-make "for" :is-loop t))
-(defconst jove-FUNCTION (jove-keyword-make "function" :starts-expr t))
-(defconst jove-IF (jove-keyword-make "if"))
-(defconst jove-RETURN (jove-keyword-make "return" :before-expr t))
-(defconst jove-SWITCH (jove-keyword-make "switch"))
-(defconst jove-THROW (jove-keyword-make "throw" :before-expr t))
-(defconst jove-TRY (jove-keyword-make "try"))
-(defconst jove-VAR (jove-keyword-make "var"))
-(defconst jove-CONST (jove-keyword-make "const"))
-(defconst jove-WHILE (jove-keyword-make "while" :is-loop t))
-(defconst jove-WITH (jove-keyword-make "with"))
-(defconst jove-NEW (jove-keyword-make "new" :before-expr t :starts-expr t))
-(defconst jove-THIS (jove-keyword-make "this" :starts-expr t))
-(defconst jove-SUPER (jove-keyword-make "super" :starts-expr t))
-(defconst jove-CLASS (jove-keyword-make "class"))
-(defconst jove-EXTENDS (jove-keyword-make "extends" :before-expr t))
-(defconst jove-EXPORT (jove-keyword-make "export"))
-(defconst jove-IMPORT (jove-keyword-make "import"))
-(defconst jove-NULL (jove-keyword-make "null" :starts-expr t))
-(defconst jove-UNDEFINED (jove-keyword-make "undefined" :starts-expr t))
-(defconst jove-TRUE (jove-keyword-make "true" :starts-expr t))
-(defconst jove-FALSE (jove-keyword-make "false" :starts-expr t))
-(defconst jove-IN (jove-keyword-make "in" :binop 7 :before-expr t))
-(defconst jove-INSTANCEOF (jove-keyword-make "instanceof" :binop 7 :before-expr t))
-(defconst jove-TYPEOF (jove-keyword-make "typeof" :prefix t :before-expr t :starts-expr t))
-(defconst jove-VOID (jove-keyword-make "void" :prefix t :before-expr t :starts-expr t))
-(defconst jove-DELETE (jove-keyword-make "delete" :prefix t :before-expr t :starts-expr t))
+(defconst jove-BREAK (jove-make-keyword "break"))
+(defconst jove-CASE (jove-make-keyword "case" :before-expr t))
+(defconst jove-CATCH (jove-make-keyword "catch"))
+(defconst jove-CONTINUE (jove-make-keyword "continue"))
+(defconst jove-DEBUGGER (jove-make-keyword "debugger"))
+(defconst jove-DEFAULT (jove-make-keyword "default"))
+(defconst jove-DO (jove-make-keyword "do" :before-expr t))
+(defconst jove-ELSE (jove-make-keyword "else" :before-expr t))
+(defconst jove-FINALLY (jove-make-keyword "finally"))
+(defconst jove-FOR (jove-make-keyword "for"))
+(defconst jove-FUNCTION (jove-make-keyword "function" :starts-expr t))
+(defconst jove-IF (jove-make-keyword "if"))
+(defconst jove-RETURN (jove-make-keyword "return" :before-expr t))
+(defconst jove-SWITCH (jove-make-keyword "switch"))
+(defconst jove-THROW (jove-make-keyword "throw" :before-expr t))
+(defconst jove-TRY (jove-make-keyword "try"))
+(defconst jove-VAR (jove-make-keyword "var"))
+(defconst jove-CONST (jove-make-keyword "const"))
+(defconst jove-WHILE (jove-make-keyword "while"))
+(defconst jove-WITH (jove-make-keyword "with"))
+(defconst jove-NEW (jove-make-keyword "new" :before-expr t :starts-expr t))
+(defconst jove-THIS (jove-make-keyword "this" :starts-expr t))
+(defconst jove-SUPER (jove-make-keyword "super" :starts-expr t))
+(defconst jove-CLASS (jove-make-keyword "class"))
+(defconst jove-EXTENDS (jove-make-keyword "extends" :before-expr t))
+(defconst jove-EXPORT (jove-make-keyword "export"))
+(defconst jove-IMPORT (jove-make-keyword "import"))
+(defconst jove-IN (jove-make-keyword "in" :binop 7 :before-expr t))
+(defconst jove-INSTANCEOF (jove-make-keyword "instanceof" :binop 7 :before-expr t))
+(defconst jove-TYPEOF (jove-make-keyword "typeof" :prefix t :before-expr t :starts-expr t))
+(defconst jove-VOID (jove-make-keyword "void" :prefix t :before-expr t :starts-expr t))
+(defconst jove-DELETE (jove-make-keyword "delete" :prefix t :before-expr t :starts-expr t))
+
+;;; Atom Token Types
+
+(defvar jove-NULL (jove-make-atom "null"))
+(defvar jove-UNDEFINED (jove-make-atom "undefined"))
+(defvar jove-TRUE (jove-make-atom "true"))
+(defvar jove-FALSE (jove-make-atom "false"))
+(defvar jove-NAN (jove-make-atom "NaN"))
+(defvar jove-INFINITY (jove-make-atom "Infinity"))
+
+;;; Contextual Keyword Token Types
+
+(defvar jove-AS (jove-make-contextual "as"))
+(defvar jove-OF (jove-make-contextual "of"))
+(defvar jove-GET (jove-make-contextual "get"))
+(defvar jove-SET (jove-make-contextual "set"))
+(defvar jove-LET (jove-make-contextual "let"))
+(defvar jove-FROM (jove-make-contextual "from"))
+(defvar jove-ASYNC (jove-make-contextual "async"))
+(defvar jove-YIELD (jove-make-contextual "yield"))
+(defvar jove-AWAIT (jove-make-contextual "await"))
+(defvar jove-STATIC (jove-make-contextual "static"))
 
 ;;; Context Types
 
@@ -374,13 +406,17 @@ slash character as either an operator or regular expression delimiter.")
 (defun jove-warn (start end message)
   "Queue a warning from START to END with MESSAGE.
 Push the warning into the list `jove--warnings'."
-  (push (vector start end message) jove--warnings)
+  (push (list start end message) jove--warnings)
   nil)                                  ; Return nil
 
 (defun jove-unexpected-char ()
   "Signal unexpected character error at current position."
   (jove-warn (point) (1+ (point)) "unexpected char")
   (forward-char))
+
+(defun jove-token-raw ()
+  "Return the raw value of the current token from the buffer."
+  (buffer-substring-no-properties jove--start jove--end))
 
 ;; http://nullprogram.com/blog/2017/01/30/
 ;; Builting a list and using `nreverse' is the correct way to build a
@@ -507,7 +543,7 @@ Return number for lines moved over."
 (defun jove-update-ctx (prev-tt)
   "Modify ctx-stack and expr-allowed to reflect change of PREV-TT."
   (cond
-   ((and (jove-tt-keyword jove--tt)
+   ((and (jove-tt-is-keyword jove--tt)
          (eq jove-DOT prev-tt))
     ;; Don't know what situation this is trying to catch.
     (setq jove--expr-allowed nil))
@@ -984,12 +1020,12 @@ delimiter."
       (setq tt (or (gethash (intern word) jove-keywords)
                    jove-NAME)))
     (jove-finish-token tt word)
-    (when (jove-tt-keyword jove--tt)
-      (jove-set-face jove--start
-                 jove--end
-                 (if (memq jove--tt (list jove-TRUE jove-FALSE jove-UNDEFINED jove-NULL jove-THIS jove-SUPER))
-                     'font-lock-builtin-face
-                   'font-lock-keyword-face)))))
+    (cond
+     ((jove-tt-is-keyword jove--tt)
+      (jove-set-face jove--start jove--end 'font-lock-keyword-face))
+     ((or (jove-tt-is-atom jove--tt)
+          (memq jove--tt (list jove-THIS jove-SUPER)))
+      (jove-set-face jove--start jove--end 'font-lock-builtin-face)))))
 
 (defun jove-read-token (char)
   "Read token using STATE with supplied CHAR."

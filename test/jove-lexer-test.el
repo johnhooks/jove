@@ -50,9 +50,9 @@
   (while (not (eq jove-EOB jove--tt))
     (jove-next-token))
   (let ((warning (car jove--warnings)))
-    (should (vectorp warning))
-    (should (equal start (aref warning 0)))
-    (should (equal end (aref warning 1)))))
+    (should (listp warning))
+    (should (equal start (nth 0 warning)))
+    (should (equal end (nth 1 warning)))))
 
 (cl-defmacro jove-test-env (content bind func)
   ;; The test environment.
@@ -444,45 +444,64 @@
           (eval
            `(jove-deftest-lexer
               ,(intern (format "keyword-%s" (symbol-name tt)))
-              ,(downcase (symbol-name tt))
-              ,(intern (format "jove-%s" (symbol-name tt)))
+              ,(symbol-name tt)
+              ,(intern (format "jove-%s" (upcase (symbol-name tt))))
               :length ,(length (symbol-name tt))
-              :value ,(downcase (symbol-name tt)))))
-      '(BREAK
-        CASE
-        CATCH
-        CONTINUE
-        DEBUGGER
-        DEFAULT
-        DO
-        ELSE
-        FINALLY
-        FOR
-        FUNCTION
-        IF
-        RETURN
-        SWITCH
-        THROW
-        TRY
-        VAR
-        CONST
-        WHILE
-        WITH
-        NEW
-        THIS
-        SUPER
-        CLASS
-        EXTENDS
-        EXPORT
-        IMPORT
-        NULL
-        TRUE
-        FALSE
-        IN
-        INSTANCEOF
-        TYPEOF
-        VOID
-        DELETE))
+              :value ,(symbol-name tt))))
+      '(break
+        case
+        catch
+        continue
+        debugger
+        default
+        do
+        else
+        finally
+        for
+        function
+        if
+        return
+        switch
+        throw
+        try
+        var
+        const
+        while
+        with
+        new
+        this
+        super
+        class
+        extends
+        export
+        import
+        in
+        instanceof
+        typeof
+        void
+        delete
+
+        ;; Atom Token Types
+
+        null
+        undefined
+        true
+        false
+        NaN
+        Infinity
+
+        ;; Contextual Keyword Token Types
+
+        as
+        of
+        get
+        set
+        let
+        from
+        async
+        yield
+        await
+        static))
 
 ;;; Comment Errors
 
