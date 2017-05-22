@@ -264,7 +264,7 @@ If KEY is provided attempt to look up the message in `jove-messages'."
 (defun jove-eat (tt)
   "Return non-nil if the current token is of the type TT.
 If the test passes consume the token as a side effect."
-  (when (jove-is tt)
+  (when (eq tt jove--tt)
     (jove-next)
     t))
 
@@ -388,7 +388,8 @@ The boolean flag NO-IN forbids the 'in' operator."
   (if (and jove--in-generator
            (eq jove-YIELD jove--tt))
       (jove-parse-yield)
-    (when (memq jove--tt (list jove-PAREN-L jove-NAME))
+    (when (or (eq jove-PAREN-L jove--tt)
+              (jove-tt-is-word jove--tt))
       (setq jove--potential-arrow-at jove--start))
     (let ((start-pos jove--start)
           (left (jove-parse-maybe-conditional no-in)))
@@ -600,6 +601,7 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
         (jove-next)))
      ((jove-tt-is-word tt)
       (let ((start-pos jove--start)
+            (token (jove-make-token))
             (id (jove-parse-identifier nil)))
         (cond
          ((and (eq jove-ASYNC jove--prev-tt)
@@ -621,11 +623,11 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
               (jove-set-face* id 'font-lock-variable-name-face)
               (jove-add-child params id)
               (jove-parse-arrow-expr (jove-make-node start-pos) params nil)))
-           ((and (eq jove-ASYNC jove--prev-tt)  ; ID Should still be previous token.
+           ((and (eq jove-ASYNC jove--prev-tt)   ; ID Should still be previous token.
                  ;;(string-equal "async" (jove-get-prop id :value))
                  (jove-tt-is-word jove--tt))
             ;; Highlight 'async' as keyword.
-            (jove-set-face* id 'font-lock-keyword-face)
+            (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
             (setq id (jove-parse-identifier))
             ;; Highlight node 'id' as a parameter.
             (jove-set-face* id 'font-lock-variable-name-face)
@@ -856,13 +858,11 @@ node PROP."
   "Parse an object or class method.
 Boolean flags IS-GENERATOR and IS-ASYNC set the global variables
 `jove-in-generator' and `jove--inasync'."
+  (when (jove-tt-is-word jove--prev-tt)
+      (jove-set-face jove--prev-start jove--prev-end 'font-lock-function-name-face))
   (let ((node (jove-make-node))
         (params (prog1 (jove-make-node)
                   (jove-expect jove-PAREN-L))))
-
-    ;; FIXME: Wouldn't previous token be the left paren?
-    (when (eq jove-NAME jove--prev-tt)
-      (jove-set-face jove--prev-start jove--prev-end 'font-lock-function-name-face))
     (let ((jove--in-function t)
           (jove--in-generator is-generator)
           (jove--in-async is-async))
