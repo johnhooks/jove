@@ -88,7 +88,7 @@ it to be reparsed when the buffer is selected."
   (jove--reparse))
 
 (defun jove--reparse (&optional force)
-  "Initiate reparse using `parse-js-lex'."
+  "Initiate reparse using `jove-parse'."
   (unwind-protect
       (when (or jove--buffer-dirty-p force)
         (setq jove--buffer-dirty-p nil

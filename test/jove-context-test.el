@@ -42,9 +42,10 @@
      ,@(mapcar #'(lambda (ctx)
                    `(push ,ctx jove--ctx-stack))
                push)
-     (setq jove--tt ,tt)
+     (setq jove--tt ,tt
+           jove--prev-tt ,(or prev jove-BOB))
      ,@body
-     (jove-update-ctx ,(or prev jove-BOB))
+     (jove-update-ctx)
      (should (eq jove--expr-allowed ,expect))))
 
 (cl-defmacro jove-deftest-ctx-stack (name (tt expect &key push prev) &rest body)
@@ -53,70 +54,83 @@
      ,@(mapcar #'(lambda (ctx)
                    `(push ,ctx jove--ctx-stack))
                push)
-     (setq jove--tt ,tt)
+     (setq jove--tt ,tt
+           jove--prev-tt ,(or prev jove-BOB))
      ,@body
-     (jove-update-ctx ,(or prev jove-BOB))
+     (jove-update-ctx)
      (should (equal jove--ctx-stack ,expect))))
 
 (cl-defmacro jove-deftest-ctx-before-expr (tt)
   `(jove-deftest ,(intern (format "before-expr-%s" (symbol-name tt)))
-     (setq jove--tt ,(intern (format "jove-%s" (symbol-name tt))))
-     (jove-update-ctx jove-BOB)
+     (setq jove--tt ,(intern (format "jove-%s" (symbol-name tt)))
+           jove--prev-tt jove-BOB)
+     (jove-update-ctx)
      (should (eq t jove--expr-allowed))))
 
 (cl-defmacro jove-deftest-ctx-not-before-expr (tt)
   `(jove-deftest ,(intern (format "not-before-expr-%s" (symbol-name tt)))
-     (setq jove--tt ,(intern (format "jove-%s" (symbol-name tt))))
-     (jove-update-ctx jove-BOB)
+     (setq jove--tt ,(intern (format "jove-%s" (symbol-name tt)))
+           jove--prev-tt jove-BOB)
+     (jove-update-ctx)
      (should (eq nil jove--expr-allowed))))
 
 (jove-deftest brace-is-block-colon-b-stat
   (push jove-B-STAT jove--ctx-stack)
-  (should (eq t (jove-brace-is-block-p jove-COLON))))
+  (setq jove--prev-tt jove-COLON)
+  (should (eq t (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-colon-b-expr
   (push jove-B-EXPR jove--ctx-stack)
-  (should (eq nil (jove-brace-is-block-p jove-COLON))))
+  (setq jove--prev-tt jove-COLON)
+  (should (eq nil (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-return
   (insert "return {}")
   (goto-char 1)
   (jove-next-token)
-  (jove-skip-space)
-  (should (eq nil (jove-brace-is-block-p jove-RETURN))))
+  (jove-skip-space)                    ; Previous token not set.
+  (setq jove--prev-tt jove-RETURN)
+  (should (eq nil (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-return-newline
   (insert "return \n {}")
   (goto-char 1)
   (jove-next-token)
   (jove-skip-space)
-  (should (eq t (jove-brace-is-block-p jove-RETURN))))
+  (should (eq t (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-else
-  (should (eq t (jove-brace-is-block-p jove-ELSE))))
+  (setq jove--prev-tt jove-ELSE)
+  (should (eq t (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-semi
-  (should (eq t (jove-brace-is-block-p jove-SEMI))))
+  (setq jove--prev-tt jove-SEMI)
+  (should (eq t (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-bob
-  (should (eq t (jove-brace-is-block-p jove-BOB))))
+  (setq jove--prev-tt jove-BOB)
+  (should (eq t (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-paren-r
-  (should (eq t (jove-brace-is-block-p jove-PAREN-R))))
+  (setq jove--prev-tt jove-PAREN-R)
+  (should (eq t (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-brace-l-b-stat
   (push jove-B-STAT jove--ctx-stack)
-  (should (eq t (jove-brace-is-block-p jove-BRACE-L))))
+  (setq jove--prev-tt jove-BRACE-L)
+  (should (eq t (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-expr-allowed
-  ;; The argument to `jove-brace-is-block-p' is just a place holder.
-  (setq jove--expr-allowed t)
-  (should (eq nil (jove-brace-is-block-p jove-ASSIGN))))
+  (setq jove--expr-allowed t
+        ;; Placeholder to insure token type does not influence test.
+        jove--prev-tt (jove-make-tt "dummy"))
+  (should (eq nil (jove-brace-is-block-p))))
 
 (jove-deftest brace-is-block-expr-not-allowed
-  ;; The argument to `jove-brace-is-block-p' is just a place holder.
-  (setq jove--expr-allowed nil)
-  (should (eq t (jove-brace-is-block-p jove-BRACE-R))))
+  (setq jove--expr-allowed nil
+        ;; Placeholder to insure token type does not influence test.
+        jove--prev-tt (jove-make-tt "dummy"))
+  (should (eq t (jove-brace-is-block-p))))
 
 ;;; Update Context Functions
 

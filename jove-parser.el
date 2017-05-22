@@ -25,22 +25,6 @@
 
 ;;; Buffer Local Variables
 
-(defvar-local jove--prev-start 1
-  "Current token start position.")
-
-(defvar-local jove--prev-end 1
-  "Current token end position.")
-
-(defvar-local jove--prev-tt jove-BOB
-  "Current token type.")
-
-(defvar-local jove--prev-value nil
-  "Current token value.
-Additional information beyond type.")
-
-(defvar-local jove--prev-linum nil
-  "Current line number.")
-
 (defvar-local jove--in-function nil
   "Boolean flag to indicate the parser is in a function.")
 
@@ -77,11 +61,6 @@ If STATE not supplied create an initial state."
 
 (defsubst jove-next ()
   "Advance parser to next token."
-  (setq jove--prev-start jove--start
-        jove--prev-end jove--end
-        jove--prev-tt jove--tt
-        jove--prev-value jove--value
-        jove--prev-linum jove--linum)
   (jove-next-token))
 
 (defun jove-peek (&optional count)
@@ -93,7 +72,15 @@ Return a copy of the updated LEX-STATE."
           (jove--end jove--end)
           (jove--tt jove--tt)
           (jove--value jove--value)
-          (jove--linum jove--linum))
+          (jove--linum jove--linum)
+          (jove--expr-allowed jove--expr-allowed)
+          (jove--newline-before jove--newline-before)
+          (jove--ctx-stack jove--ctx-stack)
+          (jove--prev-start jove--prev-start)
+          (jove--prev-end jove--prev-end)
+          (jove--prev-tt jove--prev-tt)
+          (jove--prev-value jove--prev-value)
+          (jove--prev-linum jove--prev-linum))
       (if (numberp count)
           (progn
             (while (< 0 (setq count (1- count)))

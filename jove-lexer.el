@@ -96,11 +96,11 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
         end (max (point-min) end))
   (push (list start end 'font-lock-face face) jove--fontifications))
 
-(defsubst jove-set-face* (list face)
-  "Queue region for fontification using FACE.
-Use location data in `jove-start' and `jove-end' of VEC."
-  ;;  `jove-start' is not defined yet here.
-  (jove-set-face (jove-start list) (jove-end list) face))
+(defsubst jove-set-face* (object face)
+  "Queue region from OBJECT for fontification using FACE.
+Both nodes and tokens use zero index for the start position and
+the first index for the end position."
+  (jove-set-face (nth 0 object) (nth 1 object) face))
 
 ;;; Token Types
 
@@ -129,7 +129,9 @@ Use location data in `jove-start' and `jove-end' of VEC."
 
 (cl-defun jove-make-tt (label &key before-expr starts-expr prefix postfix binop
                           is-keyword is-assign is-word is-atom)
-  "Return a vector representing a token type."
+  "Return a vector representing a token type.
+LABEL should be a string.  The remaining arguments are key value
+pairs representing different token type characteristic to set."
   (vector label                         ; 0
           before-expr                   ; 1
           starts-expr                   ; 2
@@ -174,33 +176,35 @@ Use location data in `jove-start' and `jove-end' of VEC."
 
 (defun jove-make-binop (label prec)
   "Return a vector representing a binary operator token type.
-LABEL should be a string and PREC a number for operator precedence."
+LABEL should be a string and PREC an integer of operator precedence."
   (jove-make-tt label :before-expr t :binop prec))
 
 (defun jove-make-keyword (label &rest options)
   "Return a vector representing a keyword token type.
-LABEL should be a string and the remaining arguments are key value
+LABEL should be a string.  The remaining arguments are key value
 pairs collected in OPTIONS."
-  (let ((tt (apply #'jove-make-tt (append `(,label :is-keyword t) options))))
+  (let ((tt (apply #'jove-make-tt
+                   (append `(,label :is-keyword t)
+                           options))))
     (puthash (intern label) tt jove-keywords)))
 
 (defun jove-make-atom (label &rest options)
-  "Return a vector representing a keyword token type.
-LABEL should be a string and the remaining arguments are key value
+  "Return a vector representing an atom token type.
+LABEL should be a string.  The remaining arguments are key value
 pairs collected in OPTIONS."
-  (let ((tt (apply #'jove-make-tt (append `(,label :is-atom t :starts-expr t)
-                                      options))))
+  (let ((tt (apply #'jove-make-tt
+                   (append `(,label :is-atom t :is-keyword t :starts-expr t)
+                           options))))
     (puthash (intern label) tt jove-keywords)))
 
 (defun jove-make-contextual (label &rest options)
   "Return a vector representing a keyword token type.
-LABEL should be a string and the remaining arguments are key value
+LABEL should be a string.  The remaining arguments are key value
 pairs collected in OPTIONS."
-  (let ((tt (apply #'jove-make-tt (append `(,label :is-word t) options))))
+  (let ((tt (apply #'jove-make-tt
+                   (append `(,label :is-word t)
+                           options))))
     (puthash (intern label) tt jove-keywords)))
-
-(defvar jove-keywords (make-hash-table :test 'equal)
-  "Hash table to map keyword names to token types.")
 
 (defconst jove-NUM (jove-make-tt "num" :starts-expr t))
 (defconst jove-REGEXP (jove-make-tt "regexp" :starts-expr t))
@@ -373,28 +377,40 @@ pairs collected in OPTIONS."
 
 (defvar-local jove--value nil
   "Current token value.
-Additional information beyond type.")
+Used by `jove-read-word' to store the parsed string value.")
 
 (defvar-local jove--linum nil
   "Current line number.")
-
-(defsubst jove--inc-linum ()
-  "Increment `jove--linum'."
-  (setq jove--linum (1+ jove--linum)))
 
 (defvar-local jove--expr-allowed t
   "Boolean to indicate whether an expression is allowed.")
 
 (defvar-local jove--newline-before t
-  "Boolean to indicate a newline between previous and current tokens.")
+  "Boolean to indicate a newline between the previous and current token.")
 
 (defvar-local jove--ctx-stack '()
-  "Lexer state token context stack.
+  "Lexer state context stack.
 Used to superficially track syntactic context in order to interpret a
 slash character as either an operator or regular expression delimiter.")
 
+(defvar-local jove--prev-start 1
+  "Previous token start position.")
+
+(defvar-local jove--prev-end 1
+  "Previous token end position.")
+
+(defvar-local jove--prev-tt jove-BOB
+  "Previoustoken type.")
+
+(defvar-local jove--prev-value nil
+  "Previous token value.
+Additional information beyond type.")
+
+(defvar-local jove--prev-linum nil
+  "Previous line number.")
+
 (defun jove-make-token ()
-  "Make a token from lexer state."
+  "Make a token from the lexer global variables."
   (list jove--start
         jove--end
         jove--tt
@@ -462,22 +478,24 @@ Otherwise signal `jove-unexpected-character-error'."
     (jove-unexpected-char)))
 
 (defun jove-skip-line-comment ()
-  "Skip line comment and run comment hook."
+  "Skip line comment.
+Run comment hook after the end is found."
   (let ((start (point)))
     (if (search-forward "\n" nil t)
-        (jove--inc-linum)
-      (goto-char (point-max)))
+        (setq jove--linum (1+ jove--linum))
+      (goto-char (point-max)))          ; Reached the end of the buffer.
     (jove-set-face start (point) 'font-lock-comment-face)
     (run-hook-with-args 'jove-comment-hook start (point))))
 
 (defun jove-skip-block-comment ()
-  "Skip block comment and run comment hook."
+  "Skip block comment.
+Run comment hook after the end is found."
   (let ((start (point))
         (looping t))
     (while looping
       (re-search-forward "*/\\|\n" nil t)
       (if (eq ?\C-j (char-before))
-          (jove--inc-linum)
+          (setq jove--linum (1+ jove--linum))
         (if (and (eq ?\/ (char-before))
                  (eq ?* (char-before (1- (point)))))
             (setq looping nil)))
@@ -489,7 +507,8 @@ Otherwise signal `jove-unexpected-character-error'."
 
 (defun jove-skip-space ()
   "Skip whitespace and comments.
-Return number for lines moved over."
+When a newline is encountered, `jove--newline-before' is set to t and
+`jove--linum' is incremented."
   (let ((first nil)
         (second nil)
         (prev-linum jove--linum))
@@ -506,7 +525,7 @@ Return number for lines moved over."
               (throw 'whitespace nil))))
          ((eq ?\C-j first)
           (forward-char)
-          (jove--inc-linum))
+          (setq jove--linum (1+ jove--linum)))
          (t                             ; Includes eob.
           (throw 'whitespace nil)))))
     ;; TODO: Implement a newline event function.
@@ -519,37 +538,41 @@ Return number for lines moved over."
   (car jove--ctx-stack))
 
 (defun jove-initial-ctx ()
-  "Return the initial context for use in `jove-ctx-stack'."
+  "Return the initial context for use for `jove--ctx-stack'."
   (list jove-B-STAT))
 
-(defun jove-brace-is-block-p (prev-tt)
-  "Use `jove-current-ctx' and PREV-TT to determine if brace is a block."
+(defun jove-brace-is-block-p ()
+  "Return non-nil of if brace is a block.
+The `jove--current-ctx' and `jove--prev-tt' are used to determine
+the context of a left brace character."
   (cond
-   ((eq jove-COLON prev-tt)
-    ;; If previous token type is a colon, determine its use as either
-    ;; a statement label or a property key in an object literal.
+   ((eq jove-COLON jove--prev-tt)
+    ;; If previous token type is a colon, determine it is used in a
+    ;; property key in an object literal.
     (let ((parent (jove-current-ctx)))
       (if (memq parent (list jove-B-STAT jove-B-EXPR))
           (not (jove-ctx-is-expr parent)))))
-   ((eq jove-RETURN prev-tt)
+   ((eq jove-RETURN jove--prev-tt)
     jove--newline-before)
-   ((memq prev-tt (list jove-ELSE jove-SEMI jove-BOB jove-PAREN-R))
+   ((memq jove--prev-tt (list jove-ELSE jove-SEMI jove-BOB jove-PAREN-R))
     t)
-   ((eq jove-BRACE-L prev-tt)
+   ((eq jove-BRACE-L jove--prev-tt)
     (eq jove-B-STAT (jove-current-ctx)))
    (t
     (not jove--expr-allowed))))
 
-(defun jove-update-ctx (prev-tt)
-  "Modify ctx-stack and expr-allowed to reflect change of PREV-TT."
+(defun jove-update-ctx ()
+  "Update the syntactic context stack.
+The `jove--ctx-stack' and `jove--expr-allowed' variables are
+modified to reflect the change of `jove--prev-tt'."
   (cond
    ((and (jove-tt-is-keyword jove--tt)
-         (eq jove-DOT prev-tt))
+         (eq jove-DOT jove--prev-tt))
     ;; Don't know what situation this is trying to catch.
     (setq jove--expr-allowed nil))
    ;; '{'  Enter brace statement, expression context.
    ((eq jove-BRACE-L jove--tt)
-    (push (if (jove-brace-is-block-p prev-tt)
+    (push (if (jove-brace-is-block-p)
               jove-B-STAT
             jove-B-EXPR)
           jove--ctx-stack)
@@ -568,9 +591,9 @@ Return number for lines moved over."
           (setq jove--expr-allowed t))
          (t
           (setq jove--expr-allowed (not (jove-ctx-is-expr out))))))))
-   ;; ?(  Enter parenthesis context.
+   ;; '('  Enter parenthesis context.
    ((eq jove-PAREN-L jove--tt)
-    (push (if (memq prev-tt (list jove-IF jove-FOR jove-WITH jove-WHILE))
+    (push (if (memq jove--prev-tt (list jove-IF jove-FOR jove-WITH jove-WHILE))
               jove-P-STAT
             jove-P-EXPR)
           jove--ctx-stack)
@@ -589,8 +612,8 @@ Return number for lines moved over."
    ((eq jove-INC-DEC jove--tt))
    ;; 'function'  Enter function expression context.
    ((eq jove-FUNCTION jove--tt)
-    (if (and (jove-tt-before-expr prev-tt)
-             (not (memq prev-tt (list jove-SEMI jove-ELSE jove-COLON jove-BRACE-L)))
+    (if (and (jove-tt-before-expr jove--prev-tt)
+             (not (memq jove--prev-tt (list jove-SEMI jove-ELSE jove-COLON jove-BRACE-L)))
              (eq jove-B-STAT (jove-current-ctx)))
         (push jove-F-EXPR jove--ctx-stack))
     (setq jove--expr-allowed nil))
@@ -601,13 +624,12 @@ Return number for lines moved over."
 ;;; Token Reading Functions
 
 (defun jove-finish-token (tt &optional value)
-  "Finish token of type TT and update the context.
+  "Finish token of type TT and update the syntactic context.
 Optionally set the token VALUE, otherwise set it to nil."
-  (let ((prev-tt jove--tt))
-    (setq jove--end (point)
-          jove--tt tt
-          jove--value value)
-    (jove-update-ctx prev-tt)))
+  (setq jove--end (point)
+        jove--tt tt
+        jove--value value)
+  (jove-update-ctx))
 
 (defun jove-finish-punc (tt)
   "Finish punctuation token of type TT."
@@ -615,26 +637,27 @@ Optionally set the token VALUE, otherwise set it to nil."
   (jove-finish-token tt))
 
 (defun jove-finish-op (tt size)
-  "Finish operator token of  type TT and SIZE."
+  "Finish operator token of type TT and SIZE."
   (goto-char (+ (point) size))
   (jove-finish-token tt))
 
 (defun jove-read-token-dot ()
   "Read a token starting with a period."
-  (cond ((jove-eat-re ".[0-9]+\\(?:[eE][-+]?[0-9]+\\)?")
-         (jove-finish-token jove-NUM))
-        ((and (eq ?. (jove-peek-char)) (eq ?. (jove-peek-char 2))) ; ...
-         (forward-char 3)             ; Why not `jove-finish-op'?
-         (jove-finish-token jove-ELLIPSIS))
-        (t
-         (forward-char)
-         (jove-finish-token jove-DOT))))
+  (cond
+   ((jove-eat-re ".[0-9]+\\(?:[eE][-+]?[0-9]+\\)?")
+    (jove-finish-token jove-NUM))
+   ((and (eq ?. (jove-peek-char)) (eq ?. (jove-peek-char 2))) ; ...
+    (forward-char 3)                    ; Why not `jove-finish-op'?
+    (jove-finish-token jove-ELLIPSIS))
+   (t
+    (forward-char)
+    (jove-finish-token jove-DOT))))
 
 (defun jove-read-token-slash ()
-  "Read a token starting with a ?\/."
+  "Read a token starting with a forward slash."
   (let ((next (jove-peek-char)))
     (cond
-     (jove--expr-allowed      ; Must be a regular expression.
+     (jove--expr-allowed                   ; Must be a regular expression.
       (jove-read-regexp))
      ((eq ?= next)
       (jove-finish-op jove-ASSIGN 2))
@@ -651,22 +674,23 @@ Optionally set the token VALUE, otherwise set it to nil."
                 (jove-finish-op jove-ASSIGN 3)  ; **=
               (jove-finish-op jove-STARSTAR 2)) ; **
           (if (eq ?= second)
-              (jove-finish-op jove-ASSIGN 2) ; *=
-            (jove-finish-op jove-STAR 1)))   ; *
+              (jove-finish-op jove-ASSIGN 2)    ; *=
+            (jove-finish-op jove-STAR 1)))      ; *
       ;; % %=
       (if (eq ?= second)
-          (jove-finish-op jove-ASSIGN 2)   ; %=
-        (jove-finish-op jove-MODULO 1))))) ; %
+          (jove-finish-op jove-ASSIGN 2)        ; %=
+        (jove-finish-op jove-MODULO 1)))))      ; %
 
 (defun jove-read-token-pipe-amp (first)
   "Read a token starting with a ?| or ?&, FIRST indicates which."
   (let ((second (jove-peek-char)))
-    (cond ((eq first second)            ; && ||
-           (jove-finish-op (if (eq ?& first) jove-LOGICAL-AND jove-LOGICAL-OR) 2))
-          ((eq ?= second)               ; &= |=
-           (jove-finish-op jove-ASSIGN 2))
-          (t                            ; & |
-           (jove-finish-op (if (eq ?& first) jove-BITWISE-AND jove-BITWISE-OR) 1)))))
+    (cond
+     ((eq first second)                 ; && ||
+      (jove-finish-op (if (eq ?& first) jove-LOGICAL-AND jove-LOGICAL-OR) 2))
+     ((eq ?= second)                    ; &= |=
+      (jove-finish-op jove-ASSIGN 2))
+     (t                                 ; & |
+      (jove-finish-op (if (eq ?& first) jove-BITWISE-AND jove-BITWISE-OR) 1)))))
 
 (defun jove-read-token-caret ()
   "Read a token starting with a ?^."
@@ -677,12 +701,13 @@ Optionally set the token VALUE, otherwise set it to nil."
 (defun jove-read-token-plus-min (first)
   "Read a token starting with a ?+ or ?-, FIRST indicates which."
   (let ((second (jove-peek-char)))
-    (cond ((eq first second)
-           (jove-finish-op jove-INC-DEC 2))
-          ((eq ?= second)
-           (jove-finish-op jove-ASSIGN 2))
-          (t
-           (jove-finish-op jove-PLUS-MIN 1)))))
+    (cond
+     ((eq first second)
+      (jove-finish-op jove-INC-DEC 2))
+     ((eq ?= second)
+      (jove-finish-op jove-ASSIGN 2))
+     (t
+      (jove-finish-op jove-PLUS-MIN 1)))))
 
 ;; Not implementing XML-style comments for now <!--
 (defun jove-read-token-lt-gt (first)
@@ -704,13 +729,14 @@ Optionally set the token VALUE, otherwise set it to nil."
 (defun jove-read-token-eq-excl (first)
   "Read a token starting with a ?= or ?!, FIRST indicates which."
   (let ((second (jove-peek-char)))
-    (cond ((eq ?> second)               ; =>
-           (forward-char 2)
-           (jove-finish-token jove-ARROW))
-          ((eq ?= second)               ; == != === !==
-           (jove-finish-op jove-EQUALITY (if (eq ?= (jove-peek-char 2)) 3 2)))
-          (t                            ; = !
-           (jove-finish-op (if (eq ?= first) jove-EQ jove-PREFIX) 1)))))
+    (cond
+     ((eq ?> second)                    ; =>
+      (forward-char 2)
+      (jove-finish-token jove-ARROW))
+     ((eq ?= second)                    ; == != === !==
+      (jove-finish-op jove-EQUALITY (if (eq ?= (jove-peek-char 2)) 3 2)))
+     (t                                 ; = !
+      (jove-finish-op (if (eq ?= first) jove-EQ jove-PREFIX) 1)))))
 
 (defsubst jove-buffer-to-number (start end radix)
   "Attempt to read a number from buffer from START to END in RADIX."
@@ -718,7 +744,8 @@ Optionally set the token VALUE, otherwise set it to nil."
 
 (defun jove-read-code-point ()
   "Read Unicode escape from buffer.
-Return an integer representing the escape if valid, otherwise nil."
+Return an integer representing the Unicode character if valid,
+otherwise nil."
   (let ((code nil)
         (start (point)))
     (if (eq ?{ (char-after))
@@ -741,39 +768,36 @@ Return an integer representing the escape if valid, otherwise nil."
         (jove-eat-re "[0-9A-Fa-f]\\{1,3\\}")
         (jove-warn (- start 2) (point) "Invalid Unicode escape sequence")))))
 
-(defun jove-read-escape-char (&optional in-template)
-  "Read ECMAScript escape sequence from buffer.
-The IN-TEMPLATE option invalidates the use of octal literals in the string."
+(defun jove-read-escape-char ()
+  "Read JavaScript escape sequence from buffer."
   (forward-char)                        ; Move over '\'
   (let ((start (1- (point)))
         (char (char-after)))
     ;; If invalid escapes are found attempt to warn about them.
-    (cond ((eq ?u char)
-           (forward-char)
-           (jove-read-code-point))
-          ((eq ?x char)
-           (forward-char)
-           (unless (jove-eat-re "[0-9A-Fa-f]\\{2\\}")
-             (jove-eat-re jove-hexadecimal-re)
-             (jove-warn start (point) "Invalid hexadecimal escape")))
-          ((<= ?0 char ?7)
-           (jove-eat-re "[0-7]\\{1,3\\}")
-           (when (or jove-strict
-                     in-template)
-             (jove-warn start (point) "Octal in template string")))
-          (t                            ; Any other escape
-           (forward-char)))))
+    (cond
+     ((eq ?u char)
+      (forward-char)
+      (jove-read-code-point))
+     ((eq ?x char)
+      (forward-char)
+      (unless (jove-eat-re "[0-9A-Fa-f]\\{2\\}")
+        (jove-eat-re jove-hexadecimal-re)
+        (jove-warn start (point) "Invalid hexadecimal escape")))
+     ((<= ?0 char ?7)
+      ;; Don't warn about octals in strict or template strings.
+      (jove-eat-re "[0-7]\\{1,3\\}"))
+     (t                                 ; Any other escape
+      (forward-char)))))
 
 (defun jove-read-regexp-class ()
-  "Read regular expression class."
+  "Read a regular expression class sequence."
   (catch 'char-class
     (let (char)
       (while t
         ;; Advance to next critical character.
         (re-search-forward "[^\]\\\\\C-j]*" nil t) ; ?] ?\ or ?\C-j
-        (setq char (char-after))
         (cond
-         ((eq ?\\ char)
+         ((eq ?\\ (setq char (char-after)))
           (forward-char))
          ((eq ?\] char)
           (forward-char)
@@ -790,18 +814,17 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
       (while t
         ;; Advance to next critical character.
         (re-search-forward "[^[/\\\\\C-j]*" nil t) ; ][/\ or \n
-        (setq char (char-after))
         (cond
-         ;; Found escape.
-         ((eq ?\\ char)
+         ;; Found an escape.
+         ((eq ?\\ (setq char (char-after)))
           (goto-char (+ (point) 2)))
          ;; Found closing delimiter, exit the loop if not in a class.
          ((eq ?\/ char)
           (forward-char)
-          ;; Advance over flags, valid or not
+          ;; Advance over flags, valid or not.
           (skip-syntax-forward "w")
           (throw 'regexp t))
-         ;; Enter character class
+         ;; Enter character class.
          ((eq ?\[ char)
           (forward-char)
           (jove-read-regexp-class))
@@ -832,7 +855,7 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
           ;; Advance over flags, valid or not.
           (skip-syntax-forward "w")
           (throw 'regexp t))
-         ;; Found escape.
+         ;; Found an escape.
          ((eq ?\\ char)
           (forward-char)
           ;; Need to protect from unicode escape sequences with curlies
@@ -894,9 +917,9 @@ The IN-TEMPLATE option invalidates the use of octal literals in the string."
     (jove-read-regexp-simple)))
 
 (defun jove-read-string (punc)
-  "Search for ending delimiter matching PUNC.
-Signal error if the eol or eof is reached before the matching
-delimiter."
+  "Read a string.
+Search for ending delimiter matching PUNC.  Signal error if the
+eol or eof is reached before the matching delimiter."
   (forward-char)                        ; Move over opening delimiter.
   (let (char
         (regexp (if (eq ?\' punc)
@@ -908,7 +931,7 @@ delimiter."
       (re-search-forward regexp nil t)
       (setq char (char-after))
       (cond
-       ;; Found escape.
+       ;; Found an escape.
        ((eq ?\\ char)
         (goto-char (+ (point) 2)))
        ;; Found closing delimiter, exit the loop.
@@ -923,7 +946,7 @@ delimiter."
   (jove-set-face jove--start jove--end font-lock-string-face))
 
 (defun jove-read-tmpl-token ()
-  "Read template string tokens."
+  "Read a template string."
   (let (char)
     (catch 'token
       (while t
@@ -957,7 +980,7 @@ delimiter."
             ;; advance at least one character.
             (forward-char)))
          ((eq ?\\ char)
-          (jove-read-escape-char t))
+          (jove-read-escape-char))
          (t                             ; Hit eof.
           ;; Don't run the template hook because this isn't a real template literal.
           (jove-warn jove--start (point-max) "Missing template string closing delimiter")
@@ -1021,15 +1044,14 @@ delimiter."
                    jove-NAME)))
     (jove-finish-token tt word)
     (cond
-     ((jove-tt-is-keyword jove--tt)
-      (jove-set-face jove--start jove--end 'font-lock-keyword-face))
      ((or (jove-tt-is-atom jove--tt)
           (memq jove--tt (list jove-THIS jove-SUPER)))
-      (jove-set-face jove--start jove--end 'font-lock-builtin-face)))))
+      (jove-set-face jove--start jove--end 'font-lock-builtin-face))
+     ((jove-tt-is-keyword jove--tt)
+      (jove-set-face jove--start jove--end 'font-lock-keyword-face)))))
 
 (defun jove-read-token (char)
-  "Read token using STATE with supplied CHAR."
-  ;; Implements getTokenFromCode from acorn.
+  "Read token using provided first CHAR."
   (cond
    ((eq ?\. char) (jove-read-token-dot))
    ((eq ?\( char) (jove-finish-punc jove-PAREN-L))
@@ -1042,7 +1064,7 @@ delimiter."
    ((eq ?} char) (jove-finish-punc jove-BRACE-R))
    ((eq ?? char) (jove-finish-punc jove-QUESTION))
    ((eq ?: char) (jove-finish-punc jove-COLON))
-   ((and (eq ?\` char) (<= 6 jove-ecma-version))
+   ((eq ?\` char)
     (jove-finish-punc jove-BACKQUOTE)
     (jove-set-face jove--start jove--end font-lock-string-face))
    ((eq ?0 char)
@@ -1079,6 +1101,12 @@ delimiter."
   "Use previous STATE to read next token and return new state."
   (let ((char nil)
         (ctx (jove-current-ctx)))
+    ;; Transition current token state to previous.
+    (setq jove--prev-start jove--start
+          jove--prev-end jove--end
+          jove--prev-tt jove--tt
+          jove--prev-value jove--value
+          jove--prev-linum jove--linum)
     (when (or (not ctx)
               (not (jove-ctx-preserve-space ctx)))
       (jove-skip-space))

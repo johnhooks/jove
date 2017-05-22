@@ -27,11 +27,15 @@
   :safe 'integerp
   :group 'jove-mode)
 
+;; TODO: Remove. Always provide for lastest features which for now are
+;; upto ECMAScript 8.
 (defcustom jove-ecma-version 6
   "ECMAScript version used to parse."
   :type 'number
   :group 'jove-mode)
 
+;; TODO: Remove. Would be necessary if my purpose was to check the
+;; parsed code for validity.
 (defcustom jove-strict t
   "Parse all JavaScript as module code."
   :type 'boolean
@@ -80,6 +84,11 @@
 
 (define-error 'jove-parse-error
   "Jove parser errror" 'jove-error)
+
+;;; Global Variables
+
+(defvar jove-keywords (make-hash-table :test 'equal)
+  "Hash table to map keyword names to token types.")
 
 ;;; Buffer Local Variables
 
