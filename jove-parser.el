@@ -824,12 +824,12 @@ of the property."
     (jove-add-child prop (jove-parse-method)))
    ((and (not (jove-get-prop prop :computed))
          (eq 'identifier (jove-type (car (jove-children prop)))))
-    (let ((id (jove-make-node jove--start
-                          jove--end
+    (let ((id (jove-make-node jove--prev-start
+                          jove--prev-end
                           'identifier)))
       (jove-set-prop id :value jove--prev-value)
       (when (or is-pattern
-            (jove-is jove-EQ)))
+            (eq jove-EQ jove--tt)))
       (jove-add-child prop (jove-parse-maybe-default start-pos id))))
    (t
     (jove-unexpected)))
