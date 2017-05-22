@@ -563,14 +563,14 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
                   (let ((jove--in-declaration t))
                     (dolist (child (jove-children exprs))
                       (jove-to-assignable child)))
-                  (jove-set-type exprs 'parameters)
+                  (jove-finish* exprs 'parameters)
                     ;; Highlight 'async' as a keyword.
                   (jove-set-face id-start id-end 'font-lock-keyword-face)
                   (throw 'node (jove-parse-arrow-expr (jove-make-node start-pos)
                                                   exprs
                                                   t)))
               (let ((node (jove-make-node start-pos)))
-                (jove-set-type exprs 'arguments)
+                (jove-finish* exprs 'arguments)
                 ;; Highlight 'id' as a call.
                 (when (jove-tt-is-word id-tt)
                   (jove-set-face id-start id-end 'js2-function-call))
