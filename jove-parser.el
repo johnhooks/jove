@@ -1468,7 +1468,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
               is-generator nil
               is-async nil
               is-static nil
-              is-maybe-static (jove-is jove-STATIC))
+              is-maybe-static (eq jove-STATIC jove--tt))
 
         (when (setq is-generator (jove-eat jove-STAR))
           ;; Highlight '*'.
@@ -1487,7 +1487,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
           ;; Don't care if is-generator was already assigned before.
           (setq is-generator (jove-eat jove-STAR))
           ;; Highlight '*'.
-          (jove-set-face jove--start jove--end 'font-lock-keyword-face)
+          (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
           ;; Reparse method key.
           (jove-parse-property-name method))
 
