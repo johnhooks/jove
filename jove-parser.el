@@ -45,9 +45,12 @@ recorded.")
 (defvar-local jove--error nil
   "Current parse error.")
 
+(defvar-local jove--peeked nil
+  "Previously peeked token.")
+
 ;;; Initialization
 
-(defun jove-config (&optional state)
+(defun jove-config (&optional _state)
   "Initialize the parser.
 If STATE not supplied create an initial state."
   (setq jove--in-function nil
@@ -61,13 +64,19 @@ If STATE not supplied create an initial state."
 
 (defsubst jove-next ()
   "Advance parser to next token."
+  ;; This is just a temp measure until I figure out a better way.
+  (setq jove--prev-start jove--start
+        jove--prev-end jove--end
+        jove--prev-tt jove--tt
+        jove--prev-value jove--value
+        jove--prev-linum jove--linum)
   (jove-next-token))
 
+;; TODO: This function should not waste the tokens, they should be collected.
 (defun jove-peek (&optional count)
   "Peek ahead either one or COUNT number of tokens.
 Return a copy of the updated LEX-STATE."
   (save-excursion
-    ;; Use `vconcat' to make a copy of LEX-STATE.
     (let ((jove--start jove--start)
           (jove--end jove--end)
           (jove--tt jove--tt)
@@ -75,12 +84,7 @@ Return a copy of the updated LEX-STATE."
           (jove--linum jove--linum)
           (jove--expr-allowed jove--expr-allowed)
           (jove--newline-before jove--newline-before)
-          (jove--ctx-stack jove--ctx-stack)
-          (jove--prev-start jove--prev-start)
-          (jove--prev-end jove--prev-end)
-          (jove--prev-tt jove--prev-tt)
-          (jove--prev-value jove--prev-value)
-          (jove--prev-linum jove--prev-linum))
+          (jove--ctx-stack jove--ctx-stack))
       (if (numberp count)
           (progn
             (while (< 0 (setq count (1- count)))
@@ -93,7 +97,7 @@ Return a copy of the updated LEX-STATE."
 
 (defun jove-make-node (&optional start end type)
   "Return a node.
-If START is not supplied, its value will be set to start of the
+If START is not supplied, its will be set to the start position of the
 current token.  Optionally supply any or all START, END, or TYPE."
   (list (or start jove--start)              ; 0
         end                             ; 1
@@ -105,10 +109,10 @@ current token.  Optionally supply any or all START, END, or TYPE."
 
 (defun jove-make-node* (object &optional type) ; Can be token or node
   "Return a node.
-Use OBJECT data to set start and end location data.  Optionally
-supply node TYPE."
-  (list (jove-start object)                 ; 0
-        (jove-end object)                   ; 1
+Use OBJECT position data to set start and end location data.
+Optionally supply node TYPE."
+  (list (nth 0 object)                  ; 0
+        (nth 1 object)                  ; 1
         type                            ; 2
         nil                             ; 3 props
         nil                             ; 4 parent
@@ -249,14 +253,17 @@ If KEY is provided attempt to look up the message in `jove-messages'."
     (jove-signal (or message
                 (format "unexpected token: %s" (jove-tt-label jove--tt))))))
 
+;; TODO: Remove.
 (defsubst jove-is (tt)
   "Return non-nil if the current token is of the type TT."
   (eq tt jove--tt))
 
+;; TODO: Remove.
 (defsubst jove-is* (&rest tts)
   "Return non-nil if the current token is one of the types TTS."
   (memq jove--tt tts))
 
+;; TODO Remove.
 (defsubst jove-is-not (tt)
   "Return non-nil if the current token is not of the type TT."
   (not (eq tt jove--tt)))
@@ -268,11 +275,20 @@ If the test passes consume the token as a side effect."
     (jove-next)
     t))
 
+(defun jove-eat* (tt face)
+  "Return non-nil if the current token is of the type TT.
+If the test passes consume the token as a side effect and queue
+for fontificiation using FACE."
+  (when (eq tt jove--tt)
+    (jove-set-face jove--start jove--end face)
+    (jove-next)
+    t))
+
 (defun jove-after-trailing-comma-p (tt &optional not-next)
   "Return non-nil if the current token is of the type TT.
 Advance to next token, unless NOT-NEXT."
   ;; NOTE: Found in corn/src/parseutil.js
-  (when (jove-is tt)
+  (when (eq tt jove--tt)
     (unless not-next
       (jove-next))
     t))
@@ -417,8 +433,7 @@ The boolean flag NO-IN forbids the 'in' operator."
           (jove-add-children node
                          expr
                          (jove-parse-maybe-assign) ; no NO-IN here???
-                         (progn
-                           (jove-expect jove-COLON)
+                         (when (jove-eat jove-COLON)
                            (jove-parse-maybe-assign no-in)))
           (jove-finish node 'conditional-expression))
       expr)))
@@ -472,6 +487,7 @@ The boolean flag LOGICAL toogles a logical or binary expression"
     (jove-add-children node left right)
     (jove-finish node (if logical 'logical-expression 'binary-expression))))
 
+;; TODO: Consider where the operator needs to be saved.
 (defun jove-parse-maybe-unary (saw-unary)
   "Parse both prefix and postfix unary operators.
 Unless SAW-UNARY, build a binary expression when '**' is encountered."
@@ -503,11 +519,11 @@ Unless SAW-UNARY, build a binary expression when '**' is encountered."
           (jove-next)
           (setq expr (jove-finish node 'update-expression))))))
     (if (and (not saw-unary)
-             (eq jove-STARSTAR jove--tt))
+             (jove-eat jove-STARSTAR))
         (jove-build-binary start-pos
                        expr
                        (jove-parse-maybe-unary nil)
-                       (jove-tt-label jove--tt) ; '**'
+                       "**"
                        nil)
       expr)))
 
@@ -601,7 +617,6 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
         (jove-next)))
      ((jove-tt-is-word tt)
       (let ((start-pos jove--start)
-            (token (jove-make-token))
             (id (jove-parse-identifier nil)))
         (cond
          ((and (eq jove-ASYNC jove--prev-tt)
@@ -623,8 +638,7 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
               (jove-set-face* id 'font-lock-variable-name-face)
               (jove-add-child params id)
               (jove-parse-arrow-expr (jove-make-node start-pos) params nil)))
-           ((and (eq jove-ASYNC jove--prev-tt)   ; ID Should still be previous token.
-                 ;;(string-equal "async" (jove-get-prop id :value))
+           ((and (eq jove-ASYNC jove--prev-tt)
                  (jove-tt-is-word jove--tt))
             ;; Highlight 'async' as keyword.
             (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
@@ -638,7 +652,7 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
                 ;; Wrap the single parameter in a 'parameters' node.
                 (jove-add-child params id)
                 (jove-parse-arrow-expr (jove-make-node start-pos params t) params t))))
-           (t           ; Still need to return ID if none of the above match.
+           (t           ; Return basic identifier.
             id)))
          (t
           id))))
@@ -678,15 +692,15 @@ are allowed."
         (inner-end-pos nil)
         (inner-start-pos (progn (jove-next) jove--start)))
     (jove-parse-sequence jove-PAREN-R
-      (jove-add-child node (if (jove-is jove-ELLIPSIS)
+      (jove-add-child node (if (eq jove-ELLIPSIS jove--tt)
                            (jove-parse-rest)
                          (jove-parse-maybe-assign nil))))
     (setq inner-end-pos jove--start)
-    (jove-expect jove-PAREN-R)
+    (jove-expect jove-PAREN-R)                  ; FIX: Don't think expect is necessary.
     ;; Return a ArrowFunctionExpression or ParenthesizedExpression.
     (if (and can-be-arrow
              (not (jove-can-insert-semicolon-p))
-             (jove-is jove-ARROW))
+             (eq jove-ARROW jove--tt))
         (progn
           (jove-finish node 'parameters)
           (let ((jove--in-declaration t))
@@ -733,7 +747,7 @@ are allowed."
     ;; FIXME: If the template is empty it will skip over the closing
     ;; quasi.
     (jove-next)
-    (when (jove-is jove-BACKQUOTE)
+    (when (eq jove-BACKQUOTE jove--tt)
       (jove-set-prop node :tail t))
     (jove-finish node 'template-element)))
 
@@ -754,35 +768,49 @@ are allowed."
 (defun jove-parse-object (&optional is-pattern)
   "Parse an object literal or binding pattern.
 Optionally if IS-PATTERN, parse as an ObjectPattern."
-  (let ((start-pos nil)
+  (let ((node (jove-make-node))
         (prop nil)
+        (name nil)
+        (value nil)
+        (next nil)
         (is-async nil)
         (is-generator nil)
-        (node (jove-make-node)))
+        (start-pos nil))
     (jove-next)                             ; Move over '{'
     (jove-parse-sequence jove-BRACE-R
-      (setq prop (jove-make-node))
-      (when (not is-pattern)
-        (setq is-generator (jove-eat jove-STAR)))
-      (setq start-pos jove--start)
-      (jove-parse-property-name prop is-pattern)
-        ;; FIXME: Clean up this mess.
-      (when (and (not is-pattern)
-                 (not is-generator)
-                 (not (jove-get-prop prop :computed))
-                 ;; FIXME: If car is nil this will error.
-                 (eq 'identifier (jove-type (car (jove-children prop))))
-                 (string-equal "async" (jove-get-prop (car (jove-children prop)) :value))
-                 (not (jove-is jove-PAREN-L))
-                 (not (jove-is jove-COLON)))
-        (setq is-async t)
-        ;; FIXME: Highligh face of 'async' as a keyword.
-        (jove-set-children prop '())        ; Clear children.
-        (jove-parse-property-name prop is-pattern))
-      (jove-parse-property-value prop is-pattern is-generator is-async start-pos)
+      (setq prop (jove-make-node)
+            is-async nil
+            is-generator (and (not is-pattern) (jove-eat* jove-STAR 'font-lock-keyword-face))
+            start-pos jove--start)
+      (when (and (memq jove--tt (list jove-ASYNC jove-GET jove-SET))
+                 (not (or is-pattern is-generator))
+                 (jove-tt-is-word (jove-tt (setq next (jove-peek)))) ; Will not match keywords or atoms...
+                 ;; Maybe cut this... because the only reason we should use 'async',
+                 ;; 'get' and 'set' is with a non-computed property name, and the
+                 ;; above check would eliminate all the situations in the below condition.
+                 ;; (not (memq (jove-tt next) (list jove-COMMA jove-BRACE-R jove-PAREN-L jove-COLON)))
+                 (not (nth 4 next)))    ; The 'newline-before' slot of the next token.
+        (and (eq jove-ASYNC jove--tt)
+             (setq is-async t))
+        (jove-set-face jove--start jove--end 'font-lock-keyword-face)
+        (jove-next))
+      (setq name (jove-parse-property-name prop))
+      (setq value (jove-parse-property-value prop is-pattern is-generator is-async start-pos))
+      (when (not (jove-get-prop prop :computed))
+        (jove-set-face* name (cond
+                          ((memq (jove-type value)
+                                 '(function-expression arrow-function-expression))
+                           'font-lock-function-name-face)
+                          (is-pattern
+                           'font-lock-variable-name-face)
+                          (t
+                           'js2-object-property))))
       (jove-add-child node (jove-finish prop 'property)))
     (jove-next)                             ; Move over '}'
     (jove-finish node (if is-pattern 'object-pattern 'object-expression))))
+;; If is-pattern the property name should be highlighted as a variable declaration,
+;; If the 'async', 'get', 'set', or '*' are encountered the context needs to be
+;; examined to determine if they are contextual keywords.
 
 ;; TODO: Need a better way to flag different node options.
 (defun jove-parse-property-value (prop is-pattern is-generator is-async start-pos)
@@ -791,75 +819,54 @@ Add as a child to the node PROP.  Boolean flags IS-PATTERN,
 IS-GENERATOR, and IS-ASYNC are used to parse the property value
 according to context.  START-POS is the position at the beginning
 of the property."
-  (when (and (or is-generator is-async)
-             (jove-is jove-COLON))
-    (jove-unexpected))
-  (cond
-   ((jove-is jove-COLON)
-    (jove-set-face jove--prev-start jove--prev-end 'js2-object-property)
-    (jove-next)                             ; Move over ':'
-    (jove-add-child prop (if is-pattern
-                         (jove-parse-maybe-default start-pos)
-                       (jove-parse-maybe-assign))))
-   ((jove-is jove-PAREN-L)
-    (when is-pattern
+  (let (value)
+    (when (and (or is-generator is-async)
+               (eq jove-COLON jove--tt))
       (jove-unexpected))
-    (jove-add-child prop (jove-parse-method is-generator is-async)))
-   ((and (not (jove-get-prop prop :computed))
-         (eq 'identifier (jove-type (car (jove-children prop))))
-         ;; FIXME: Need a better way to access the key.
-         (or (string-equal "get" (jove-get-prop (car (jove-children prop)) :value))
-             (string-equal "set" (jove-get-prop (car (jove-children prop)) :value)))
-         (jove-is-not jove-COMMA)
-         (jove-is-not jove-BRACE-R))
-    (when (or is-generator is-async is-pattern)
-      (jove-unexpected))
-    ;; Highlight the contextual 'get' or 'set' as a keyword.
-    (jove-set-face* (car (jove-children prop)) 'font-lock-keyword-face)
-    ;; FIXME: The identifier for the 'get' or 'set' shouldn't be
-    ;; higlighted as a method.
-    (jove-set-children prop '())
-    (jove-parse-property-name prop)
-    ;; Raise no warnings about getter or setter arguments.
-    (jove-add-child prop (jove-parse-method)))
-   ((and (not (jove-get-prop prop :computed))
-         (eq 'identifier (jove-type (car (jove-children prop)))))
-    (let ((id (jove-make-node jove--prev-start
-                          jove--prev-end
-                          'identifier)))
-      (jove-set-prop id :value jove--prev-value)
-      (when (or is-pattern
-            (eq jove-EQ jove--tt)))
-      (jove-add-child prop (jove-parse-maybe-default start-pos id))))
-   (t
-    (jove-unexpected)))
-  ;; Maybe this is a good place to highlight the property name.
-  ;; We should have all the information on if it is a normal
-  ;; property, getter, setter, or method.
-  )
-
-(defun jove-parse-property-name (prop &optional is-pattern)
-  "Parse object property name.
-Add the parsed node to the node PROP.  The boolean IS-PATTERN
-flags whether parsing an object pattern.  Add as a child to the
-node PROP."
-  (if (jove-eat jove-BRACKET-L)
-      (progn
-        (jove-set-prop prop :computed t)
-        (jove-add-child prop (jove-parse-maybe-assign))
-        (jove-expect jove-BRACKET-R))
-    (if (jove-is* jove-NUM jove-STRING)
-        (jove-add-child prop (jove-parse-expr-atom))
+    (cond
+     ((jove-eat jove-COLON)
+      (jove-add-child prop (setq value (if is-pattern
+                                       (jove-parse-maybe-default start-pos)
+                                     (jove-parse-maybe-assign)))))
+     ((eq jove-PAREN-L jove--tt)
       (when is-pattern
-        (jove-set-face jove--start jove--end font-lock-variable-name-face))
-      (jove-add-child prop (jove-parse-identifier t)))))
+        (jove-unexpected))
+      (jove-add-child prop (setq value (jove-parse-method is-generator is-async))))
+     ;; This seems super redundant to create a node for value when its identical
+     ;; to the name.
+     ((and (not (jove-get-prop prop :computed))
+           (eq 'identifier (jove-type (car (jove-children prop)))))
+      (let ((id (jove-make-node jove--prev-start
+                            jove--prev-end
+                            'identifier)))
+        (jove-set-prop id :value jove--prev-value)
+        (when (and is-pattern
+                   (eq jove-EQ jove--tt))
+          
+          (jove-add-child prop (setq value (jove-parse-maybe-default start-pos id))))))
+     (t
+      (jove-unexpected)))
+    value))
+
+(defun jove-parse-property-name (prop)
+  "Parse object property name.
+Return the property name node.  Add child property name to PROP
+as a side effect."
+  (let (name)
+    (if (jove-eat jove-BRACKET-L)
+        (progn
+          (jove-set-prop prop :computed t)
+          (jove-add-child prop (setq name (jove-parse-maybe-assign)))
+          (jove-expect jove-BRACKET-R))
+      (jove-add-child prop (setq name (if (memq jove--tt (list jove-NUM jove-STRING))
+                                      (jove-parse-expr-atom)
+                                    (jove-parse-identifier t)))))
+    name))
 
 (defun jove-parse-method (&optional is-generator is-async)
   "Parse an object or class method.
-Boolean flags IS-GENERATOR and IS-ASYNC set the global variables
-`jove-in-generator' and `jove--inasync'."
-  (when (jove-tt-is-word jove--prev-tt)
-      (jove-set-face jove--prev-start jove--prev-end 'font-lock-function-name-face))
+Boolean flags IS-GENERATOR and IS-ASYNC lexically reset the
+global variables `jove--in-generator' and `jove--in-async'."
   (let ((node (jove-make-node))
         (params (prog1 (jove-make-node)
                   (jove-expect jove-PAREN-L))))
@@ -978,7 +985,7 @@ Updates node type, does not perform check for valid lvalues."
           (dolist (prop (jove-children object))
             ;; Second item in the list of children should be the
             ;; value of the property.
-            (jove-to-assignable (cadr (jove-children prop)))))
+            (jove-to-assignable (car (jove-children prop))))) ; cadr?
          ((eq 'array-expression type)
           (jove-set-type object 'array-pattern)
           (dolist (expr (jove-children object))
@@ -1096,6 +1103,7 @@ Add top level statements as children to NODE."
     (jove-parse-error
      (when jove-debug (message "%s" (cadr err)))))
   (jove-next)                             ; Move over EOF.
+
   (jove-finish node 'program))
 
 (defun jove-parse-statement (&optional declaration)
@@ -1201,6 +1209,8 @@ Distinguish between 'regular for', 'for in' and 'for of' statements."
      ((or is-let (memq jove--tt (list jove-VAR jove-CONST)))
       (let ((init (jove-make-node))
             (kind (if is-let 'let (intern jove--value))))
+        ;; Probably a better way... maybe in `jove-is-let'.
+        (when is-let (jove-set-face jove--start jove--end 'font-lock-keyword-face))
         (jove-next)
         (jove-parse-var init t kind)
         (jove-finish init 'variable-declaration)
@@ -1410,9 +1420,7 @@ ALLOW-EXPR-BODY permits an expression body if parsing an arrow function.
 The boolean flag IS-ASYNC is used to set the global `jove-in-async'."
   (let ((jove--in-function t)
         (jove--in-generator (when (and (not is-async)
-                                   (jove-eat jove-STAR))
-                          ;; Highlight '*' as a keyword.
-                          (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
+                                   (jove-eat* jove-STAR 'font-lock-keyword-face))
                           t))           ; Set `jove--in-generator' to t.
         (jove--in-async is-async))
     (when is-async
@@ -1468,12 +1476,8 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
               is-generator nil
               is-async nil
               is-static nil
-              is-maybe-static (eq jove-STATIC jove--tt))
-
-        (when (setq is-generator (jove-eat jove-STAR))
-          ;; Highlight '*'.
-          (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face))
-        
+              is-maybe-static (eq jove-STATIC jove--tt)
+              is-generator (jove-eat* jove-STAR 'font-lock-keyword-face)) ; Highlight if '*'.
         (jove-parse-property-name method)
         (jove-set-prop method :static
                    (setq is-static (and is-maybe-static
@@ -1485,9 +1489,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
           ;; Highlight 'static'.
           (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
           ;; Don't care if is-generator was already assigned before.
-          (setq is-generator (jove-eat jove-STAR))
-          ;; Highlight '*'.
-          (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
+          (setq is-generator (jove-eat* jove-STAR 'font-lock-keyword-face)) ; Highlight if '*'.
           ;; Reparse method key.
           (jove-parse-property-name method))
 
@@ -1523,14 +1525,12 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
   "Return NODE as 'export' declaration."
   (jove-next)
   (cond
-   ((jove-eat jove-STAR)
-    (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
-    (jove-eat jove-FROM)
-    (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
+   ((jove-eat* jove-STAR 'font-lock-keyword-face)
+    (jove-eat* jove-FROM 'font-lock-keyword-face)
     (when (eq jove-STRING jove--tt)
       (jove-add-child node (jove-parse-expr-atom)))
     (jove-finish node 'export-all-declaration))
-   ((jove-eat jove-DEFAULT)
+   ((jove-eat* jove-DEFAULT 'font-lock-keyword-face)
     (let (is-async)
       (cond
        ((or (eq jove-FUNCTION jove--tt)
@@ -1617,7 +1617,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
           (if (jove-eat jove-AS)
               (progn
                 (jove-set-face jove--start jove--end 'font-lock-keyword-face)
-                (when (eq jove-NAME jove--tt)
+                (when (jove-tt-is-word jove--tt)
                   (jove-set-face jove--start jove--end 'font-lock-variable-name-face)
                   (jove-add-child spec (jove-parse-identifier))))
             (jove-set-face jove--prev-start jove--prev-end 'font-lock-variable-name-face))

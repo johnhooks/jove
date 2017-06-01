@@ -5,6 +5,7 @@
 ;; Auther: John Hooks
 ;; URL: https://github.com/johnhooks/jove
 ;; Version: 0.2.0
+;; Package-Requires: ((js "9"))
 ;; Keywords: languages, javascript
 
 ;; This file is part of Jove Mode.
@@ -33,6 +34,8 @@
 (require 'jove-identifier)
 (require 'jove-lexer)
 (require 'jove-parser)
+(require 'jove-polyfill)
+(require 'js-align)
 
 (defgroup jove-mode nil
   "A JavaScript mode."
@@ -180,25 +183,22 @@ Buffer edit spans from BEG to END and is of length LEN."
 
 ;;; The Mode
 
-(define-derived-mode jove-mode prog-mode "\u26A1JS"
+(define-derived-mode jove-mode js-mode "\u26A1JS"
   "A JavaScript editing mode."
   :group 'jove-mode
 
   ;; Highlighting is handled by the parser.
   (setq-local font-lock-defaults '(nil t))
-  (setq-local syntax-propertize-function nil)
 
   (setq-local comment-start "// ")
   (setq-local comment-end "")
 
-  (setq-local indent-line-function #'jove-indent-line)
+  (setq-local indent-line-function #'js-align-indent-line)
 
   ;; Change hooks
   (add-hook 'before-change-functions #'jove--flush-caches t t)
   (add-hook 'after-change-functions #'jove--edit nil t)
 
-  ;; Using `js-mode' syntax propertize function for now.
-  ;; Regular expression are messing up syntax-ppss.
   (setq-local syntax-propertize-function #'js-syntax-propertize)
 
   (setq-local electric-indent-chars

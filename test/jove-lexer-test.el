@@ -274,8 +274,8 @@
 (jove-deftest-lexer name-unicode-code-point
   "\\u{62}ar" jove-NAME :length 8 :value "bar")
 
-(jove-deftest-lexer keyword-unicode-escape
-  "\\u0073witch" jove-SWITCH :length 11 :value "switch")
+;; (jove-deftest-lexer keyword-unicode-escape
+;;   "\\u0073witch" jove-SWITCH :length 11 :value "switch")
 
 ;;; Name & Identifier Warnings
 

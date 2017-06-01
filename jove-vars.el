@@ -85,14 +85,10 @@
 (define-error 'jove-parse-error
   "Jove parser errror" 'jove-error)
 
-;;; Global Variables
-
-(defvar jove-keywords (make-hash-table :test 'equal)
-  "Hash table to map keyword names to token types.")
 
 ;;; Buffer Local Variables
 
-(defvar-local jove-mode-reparse-on-edit nil
+(defvar-local jove-mode-reparse-on-edit t
   "Boolean to flag automactic reparse on edit.
 Typical use is while debugging Jove Mode itself.")
 
