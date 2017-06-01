@@ -438,6 +438,35 @@
 (jove-deftest-lexer-warning regexp-missing-delimiter-class
   "/ba[rz/" :start 1 :end 8)
 
+;; JSX
+
+(jove-deftest-lexer jsx-tag-start
+  "foo=<" jove-JSX-TAG-START :start 5 :length 1 :depth 3)
+
+(jove-deftest-lexer jsx-name
+  "foo=<Foo" jove-JSX-NAME :start 6 :length 3 :depth 4)
+
+(jove-deftest-lexer jsx-tag-end
+  "foo=<Foo>" jove-JSX-TAG-END :start 9 :length 1 :depth 5)
+
+(jove-deftest-lexer jsx-text
+  "foo=<Foo>bar = qux<" jove-JSX-TEXT :start 10 :length 9 :depth 6)
+
+(jove-deftest-lexer jsx-tag-start-after-text
+  "foo=<Foo>bar<" jove-JSX-TAG-START :start 13 :length 1 :depth 7)
+
+(jove-deftest-lexer jsx-b-tmpl
+  "foo=<Foo>{bar}<" jove-NAME :start 11 :length 3 :depth 7)
+
+(jove-deftest-lexer jsx-b-tmpl-pop
+  "foo=<Foo>{bar}<" jove-JSX-TAG-START :start 15 :length 1 :depth 9)
+
+(jove-deftest-lexer jsx-b-expr
+  "foo=<Foo bar={qux, bax} />" jove-NAME :start 15 :length 3 :depth 8)
+
+(jove-deftest-lexer jsx-b-pop
+  "foo=<Foo bar={qux, bax} />" jove-JSX-TAG-END :start 26 :length 1 :depth 13)
+
 ;;; Keywords
 
 (mapc #'(lambda (tt)

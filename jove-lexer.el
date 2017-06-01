@@ -1297,11 +1297,16 @@ eol or eof is reached before the matching delimiter."
        ((or (eq ?\" char)
             (eq ?\' char))
         (jove-jsx-read-string char))
-       ((and (eq ?< char)
+       (t
+        ;; Kluge
+        (if (or (memq (char-syntax char) '(?w ?\\)))
+            (jove-read-word)
+          (jove-read-token char)))))
+     ((and (eq ?< char)
              jove--expr-allowed
              (not (eq ?\! (jove-peek-char)))) ; <!
         (forward-char)
-        (jove-finish-token jove-JSX-TAG-START))))
+        (jove-finish-token jove-JSX-TAG-START))
 
      ;; Continuation of standard JavaScript tokens'
 
