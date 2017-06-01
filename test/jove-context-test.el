@@ -88,6 +88,78 @@
   (jove-skip-space)
   (should (eq t (jove-brace-is-block-p jove-RETURN))))
 
+;; Contextual 'yield'
+
+;; TODO: Hash out how this is should work. Seems like
+;; if the yeild or of is contextual or not brace-is-block
+;; still wants to return the same value.
+
+(jove-deftest brace-is-block-yield-inside-f-stat-gen
+  (push jove-F-STAT-GEN jove--ctx-stack)
+  (setq jove--newline-before nil
+        jove--expr-allowed nil)
+  (jove-update-ctx jove-YIELD (jove-make-tt "dummy"))
+  (should (eq nil (jove-brace-is-block-p jove-YIELD))))
+
+(jove-deftest brace-is-block-yield-inside-f-stat-gen-newline-before
+  (push jove-F-STAT-GEN jove--ctx-stack)
+  (setq jove--newline-before t
+        jove--expr-allowed nil)
+  (jove-update-ctx jove-YIELD (jove-make-tt "dummy"))
+  (should (eq t (jove-brace-is-block-p jove-YIELD))))
+
+(jove-deftest brace-is-block-yield-outside-f-stat-gen
+  (setq jove--newline-before nil
+        jove--expr-allowed nil)
+  (jove-update-ctx jove-YIELD (jove-make-tt "dummy"))
+  (should (eq t (jove-brace-is-block-p jove-YIELD))))
+
+(jove-deftest brace-is-block-yield-in-outside-stat-gen-newline-before
+  (setq jove--newline-before t
+        jove--expr-allowed nil)
+  (jove-update-ctx jove-YIELD (jove-make-tt "dummy"))
+  (should (eq t (jove-brace-is-block-p jove-YIELD))))
+
+;; Contextual 'of'
+
+(jove-deftest brace-is-block-of
+  (setq jove--newline-before nil
+        jove--expr-allowed nil)
+  (jove-update-ctx jove-OF (jove-make-tt "dummy"))
+  (should (eq nil (jove-brace-is-block-p jove-OF))))
+
+(jove-deftest brace-is-block-of-newline-before
+  (setq jove--newline-before t
+        jove--expr-allowed nil)
+  (jove-update-ctx jove-OF (jove-make-tt "dummy"))
+  (should (eq t (jove-brace-is-block-p jove-OF))))
+
+;;
+
+(jove-deftest brace-is-block-of-expr-allowed-nil
+  (setq jove--expr-allowed nil
+        jove--newline-before nil)
+  (jove-update-ctx jove-OF (jove-make-tt "dummy"))
+  (should (eq nil (jove-brace-is-block-p jove-OF))))
+
+(jove-deftest brace-is-block-of-newline-before-expr-allowed-nil
+  (setq jove--expr-allowed nil
+        jove--newline-before t)
+  (jove-update-ctx jove-OF (jove-make-tt "dummy"))
+  (should (eq t (jove-brace-is-block-p jove-OF))))
+
+(jove-deftest brace-is-block-name
+  (should (eq nil (jove-brace-is-block-p jove-NAME))))
+
+(jove-deftest brace-is-block-var
+  (should (eq nil (jove-brace-is-block-p jove-VAR))))
+
+(jove-deftest brace-is-block-const
+  (should (eq nil (jove-brace-is-block-p jove-CONST))))
+
+(jove-deftest brace-is-block-let
+  (should (eq nil (jove-brace-is-block-p jove-LET))))
+
 (jove-deftest brace-is-block-else
   (should (eq t (jove-brace-is-block-p jove-ELSE))))
 
@@ -99,6 +171,15 @@
 
 (jove-deftest brace-is-block-paren-r
   (should (eq t (jove-brace-is-block-p jove-PAREN-R))))
+
+(jove-deftest brace-is-block-arrow
+  (should (eq t (jove-brace-is-block-p jove-ARROW))))
+
+(jove-deftest brace-is-block-var
+  (should (eq nil (jove-brace-is-block-p jove-VAR))))
+
+(jove-deftest brace-is-block-name
+  (should (eq nil (jove-brace-is-block-p jove-NAME))))
 
 (jove-deftest brace-is-block-brace-l-b-stat
   (push jove-B-STAT jove--ctx-stack)
@@ -113,6 +194,24 @@
   (setq jove--expr-allowed nil)
   ;; Placeholder to insure token type does not influence test.
   (should (eq t (jove-brace-is-block-p (jove-make-tt "dummy")))))
+
+;;; In Generator ctx
+
+(jove-deftest in-generator-expr
+  (setq jove--ctx-stack (list jove-B-STAT jove-P-EXPR jove-F-EXPR-GEN jove-B-STAT))
+  (should (eq t (jove-in-generator-ctx))))
+
+(jove-deftest in-generator-stat
+  (setq jove--ctx-stack (list jove-B-STAT jove-P-EXPR jove-F-STAT-GEN jove-B-STAT))
+  (should (eq t (jove-in-generator-ctx))))
+
+(jove-deftest not-in-generator-expr
+  (setq jove--ctx-stack (list jove-F-STAT jove-B-STAT jove-P-EXPR jove-F-EXPR-GEN jove-B-STAT))
+  (should (eq nil (jove-in-generator-ctx))))
+
+(jove-deftest not-in-generator-stat
+  (setq jove--ctx-stack (list jove-F-STAT jove-B-STAT jove-P-EXPR jove-F-STAT-GEN jove-B-STAT))
+  (should (eq nil (jove-in-generator-ctx))))
 
 ;;; Update Context Functions
 
@@ -155,6 +254,15 @@
 
 (jove-deftest-ctx-stack brace-r-f-expr
   (jove-BRACE-R (list jove-B-STAT) :push (jove-F-EXPR jove-B-STAT)))
+
+(jove-deftest-ctx-stack brace-r-f-stat
+  (jove-BRACE-R (list jove-B-STAT) :push (jove-F-STAT jove-B-STAT)))
+
+(jove-deftest-ctx-stack brace-r-f-expr-gen
+  (jove-BRACE-R (list jove-B-STAT) :push (jove-F-EXPR-GEN jove-B-STAT)))
+
+(jove-deftest-ctx-stack brace-r-f-stat-gen
+  (jove-BRACE-R (list jove-B-STAT) :push (jove-F-STAT-GEN jove-B-STAT)))
 
 (jove-deftest-ctx-stack brace-r-b-tmpl
   (jove-BRACE-R (list jove-B-STAT) :push (jove-B-TMPL)))
@@ -224,30 +332,86 @@
 (jove-deftest-ctx-update function
   (jove-FUNCTION nil))
 
+(let ((before-expr (jove-make-tt "dummy" :before-expr t))
+      (not-before-expr (jove-make-tt "dummy" :before-expr nil))))
+
 (jove-deftest-ctx-stack function-prev-tt-not-before-expr
-  (jove-FUNCTION (list jove-B-STAT))
-  (setq jove--expr-allowed nil))
+  (jove-FUNCTION (list jove-F-STAT jove-B-STAT)) :prev (jove-make-tt "dummy" :before-expr nil))
 
 (jove-deftest-ctx-stack function-prev-tt-before-expr-default
-  ;; NOTE: jove-B-STAT must also be the current context.
-  ;; NOTE: Using a dummy tt for testing.
   (jove-FUNCTION (list jove-F-EXPR jove-B-STAT) :prev (jove-make-tt "dummy" :before-expr t)))
 
 (jove-deftest-ctx-stack function-prev-tt-before-expr-semi
-  (jove-FUNCTION (list jove-B-STAT) :prev jove-SEMI)
-  (setq jove--expr-allowed t))
+  (jove-FUNCTION (list jove-F-STAT jove-B-STAT) :prev jove-SEMI))
 
 (jove-deftest-ctx-stack function-prev-tt-before-expr-else
-  (jove-FUNCTION (list jove-B-STAT) :prev jove-ELSE)
-  (setq jove--expr-allowed t))
+  (jove-FUNCTION (list jove-F-STAT jove-B-STAT) :prev jove-ELSE))
 
-(jove-deftest-ctx-stack function-prev-tt-before-expr-colon
-  (jove-FUNCTION (list jove-B-STAT) :prev jove-COLON)
-  (setq jove--expr-allowed t))
+(jove-deftest-ctx-stack function-prev-tt-before-expr-colon-inside-b-stat
+  (jove-FUNCTION (list jove-F-STAT jove-B-STAT) :prev jove-COLON))
 
-(jove-deftest-ctx-stack function-prev-tt-before-expr-brace-l
-  (jove-FUNCTION (list jove-B-STAT) :prev jove-BRACE-L)
-  (setq jove--expr-allowed t))
+(jove-deftest-ctx-stack function-prev-tt-before-expr-colon-outside-b-stat
+  (jove-FUNCTION (list jove-F-EXPR jove-B-EXPR jove-B-STAT) :prev jove-COLON :push (jove-B-EXPR)))
+
+(jove-deftest-ctx-stack function-prev-tt-before-expr-brace-l-inside-b-stat
+  (jove-FUNCTION (list jove-F-STAT jove-B-STAT) :prev jove-BRACE-L))
+
+(jove-deftest-ctx-stack function-prev-tt-before-expr-brace-l-outside-b-stat
+  (jove-FUNCTION (list jove-F-EXPR jove-B-EXPR jove-B-STAT) :prev jove-BRACE-L :push (jove-B-EXPR)))
+
+;; Update Context `jove-STAR'
+
+(jove-deftest-ctx-update function
+  (jove-STAR t))
+
+(jove-deftest-ctx-stack star-prev-tt-not-function
+  (jove-STAR (list jove-B-STAT) :prev (jove-make-tt "dummy")))
+
+(jove-deftest-ctx-stack star-prev-tt-function-inside-f-stat
+  (jove-STAR (list jove-F-STAT-GEN jove-B-STAT) :prev jove-FUNCTION :push (jove-F-STAT)))
+
+(jove-deftest-ctx-stack star-prev-tt-function-inside-f-expr
+  (jove-STAR (list jove-F-EXPR-GEN jove-B-STAT) :prev jove-FUNCTION :push (jove-F-EXPR)))
+
+;; Update Context JSX
+
+;; JSX-TAG-START
+
+(jove-deftest-ctx-stack jsx-tag-start
+  (jove-JSX-TAG-START (list jove-J-OTAG jove-J-EXPR jove-B-STAT)))
+
+(jove-deftest-ctx-update jsx-tag-start
+  (jove-JSX-TAG-START nil))
+
+;; JSX-TAG-END
+
+;; <tag|>
+(jove-deftest-ctx-stack jsx-tag-end-out-j-otag
+  (jove-JSX-TAG-END (list jove-J-EXPR jove-B-STAT) :push (jove-J-EXPR jove-J-OTAG)))
+
+;; <tag /|>
+(jove-deftest-ctx-stack jsx-tag-end-out-j-otag-prev-slash
+  (jove-JSX-TAG-END (list jove-B-STAT) :prev jove-SLASH :push (jove-J-EXPR jove-J-OTAG)))
+
+;; </tag|>
+(jove-deftest-ctx-stack jsx-tag-end-out-j-ctag
+  (jove-JSX-TAG-END (list jove-B-STAT) :push (jove-J-EXPR jove-J-CTAG)))
+
+;; <tag /|>
+(jove-deftest-ctx-update jsx-tag-end-j-otag-outside-j-expr
+  (jove-JSX-TAG-END nil :prev jove-SLASH :push (jove-J-EXPR jove-J-OTAG)))
+
+;; </tag|>
+(jove-deftest-ctx-update jsx-tag-end-j-ctag-outside-j-expr
+  (jove-JSX-TAG-END nil :push (jove-J-EXPR jove-J-CTAG)))
+
+;; <parent><child /|></parent>
+(jove-deftest-ctx-update jsx-tag-end-j-otag-inside-j-expr
+  (jove-JSX-TAG-END t :prev jove-SLASH :push (jove-J-EXPR jove-J-EXPR jove-J-OTAG)))
+
+;; <parent><child></child|></parent>
+(jove-deftest-ctx-update jsx-tag-end-j-ctag-inside-j-expr
+  (jove-JSX-TAG-END t :push (jove-J-EXPR jove-J-EXPR jove-J-CTAG)))
 
 ;; For the remaining token types, the 'before-expr' slot is used to
 ;; update the lexer state 'ctx-stack' slot.

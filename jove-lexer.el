@@ -371,7 +371,7 @@ pairs collected in OPTIONS."
 
 (defvar jove-B-STAT (jove-make-ctx "{"))
 (defvar jove-B-EXPR (jove-make-ctx "{" :is-expr t))
-(defvar jove-B-TMPL (jove-make-ctx "${" :is-expr t))
+(defvar jove-B-TMPL (jove-make-ctx "${"))
 (defvar jove-P-STAT (jove-make-ctx "("))
 (defvar jove-P-EXPR (jove-make-ctx "(" :is-expr t))
 (defvar jove-Q-TMPL (jove-make-ctx "`" :is-expr t :preserve-space t :override #'jove-read-tmpl-token))
@@ -581,7 +581,7 @@ When a newline is encountered, `jove--newline-before' is set to t and
 
 ;;; Context Functions
 
-(defun jove-current-ctx ()
+(defsubst jove-current-ctx ()
   "Return the the top of the lexer context stack."
   (car jove--ctx-stack))
 
@@ -589,6 +589,7 @@ When a newline is encountered, `jove--newline-before' is set to t and
   "Return the initial context for use for `jove--ctx-stack'."
   (list jove-B-STAT))
 
+;; TODO: Figure out how to handle contextual 'yield' and 'of'
 (defun jove-brace-is-block-p (prev-tt)
   "Return non-nil of if brace is a block.
 The `jove--current-ctx' and PREV-TT are used to determine
@@ -600,12 +601,19 @@ the context of a left brace character."
     (let ((parent (jove-current-ctx)))
       (if (memq parent (list jove-B-STAT jove-B-EXPR))
           (not (jove-ctx-is-expr parent)))))
-   ((eq jove-RETURN prev-tt)
+   ;; The check for `jove-NAME' and `jove--expr-allowed' detects whether we are
+   ;; after a `yield` or `of` construct. See the `jove-ctx-update' for
+   ;; `jove-NAME'.
+   ((or (eq jove-RETURN prev-tt)
+        (and (memq prev-tt (list jove-YIELD jove-OF))
+             jove--expr-allowed))
     jove--newline-before)
-   ((memq prev-tt (list jove-ELSE jove-SEMI jove-BOB jove-PAREN-R))
+   ((memq prev-tt (list jove-ELSE jove-SEMI jove-BOB jove-PAREN-R jove-ARROW))
     t)
    ((eq jove-BRACE-L prev-tt)
     (eq jove-B-STAT (jove-current-ctx)))
+   ((memq prev-tt (list jove-VAR jove-LET jove-CONST))
+    nil)
    (t
     (not jove--expr-allowed))))
 
@@ -616,7 +624,7 @@ modified to reflect the change of `jove--prev-tt'."
   (cond
    ((and (jove-tt-is-keyword tt)
          (eq jove-DOT prev-tt))
-    ;; Don't know what situation this is trying to catch.
+    ;; NOTE: What is this condition trying to catch?
     (setq jove--expr-allowed nil))
    ;; '{'  Enter brace statement, expression context.
    ((eq jove-BRACE-L tt)
@@ -630,15 +638,11 @@ modified to reflect the change of `jove--prev-tt'."
     (if (= 1 (length jove--ctx-stack))
         (setq jove--expr-allowed t)
       (let ((out (pop jove--ctx-stack)))
-        (cond
-         ((and (eq jove-B-STAT out)
-               (eq jove-F-EXPR (jove-current-ctx)))
-          (pop jove--ctx-stack)             ; Exit of function body.
-          (setq jove--expr-allowed nil))
-         ((eq jove-B-TMPL out)
-          (setq jove--expr-allowed t))
-         (t
-          (setq jove--expr-allowed (not (jove-ctx-is-expr out))))))))
+        (when (and (eq jove-B-STAT out)
+               ;; FIXME: Use a symbol rather than a string
+                 (string-equal "function" (jove-ctx-token (jove-current-ctx))))
+          (setq out (pop jove--ctx-stack)))
+          (setq jove--expr-allowed (not (jove-ctx-is-expr out))))))
    ;; '('  Enter parenthesis context.
    ((eq jove-PAREN-L tt)
     (push (if (memq prev-tt (list jove-IF jove-FOR jove-WITH jove-WHILE))
@@ -660,14 +664,52 @@ modified to reflect the change of `jove--prev-tt'."
    ((eq jove-INC-DEC tt))
    ;; 'function'  Enter function expression context.
    ((eq jove-FUNCTION tt)
-    (if (and (jove-tt-before-expr prev-tt)
-             (not (memq prev-tt (list jove-SEMI jove-ELSE jove-COLON jove-BRACE-L)))
-             (eq jove-B-STAT (jove-current-ctx)))
-        (push jove-F-EXPR jove--ctx-stack))
+    (push (if (and (jove-tt-before-expr prev-tt)
+                   (not (memq prev-tt (list jove-SEMI jove-ELSE)))
+                   (not (and (memq prev-tt (list jove-COLON jove-BRACE-L))
+                             (eq jove-B-STAT (jove-current-ctx)))))
+              jove-F-EXPR
+            jove-F-STAT)
+          jove--ctx-stack)
     (setq jove--expr-allowed nil))
+   ((eq jove-STAR tt)
+    (when (eq jove-FUNCTION prev-tt)
+      (push (if (eq jove-F-EXPR (pop jove--ctx-stack))
+                jove-F-EXPR-GEN
+              jove-F-STAT-GEN)
+            jove--ctx-stack))
+    (setq jove--expr-allowed t))
+   ((or (and (eq jove-OF tt) (not jove--expr-allowed))
+        (and (eq jove-YIELD tt) (jove-in-generator-ctx)))
+    (setq jove--expr-allowed t))
+   ;; '<tag>'
+   ((eq jove-JSX-TAG-START tt)
+    (push jove-J-EXPR jove--ctx-stack)          ; Treat as beginning of JSX expression.
+    (push jove-J-OTAG jove--ctx-stack)          ; Start opening tag context
+    (setq jove--expr-allowed nil))
+   ;; '</tag>' or '<tag />'
+   ((eq jove-JSX-TAG-END tt)
+    (let ((out (pop jove--ctx-stack)))
+      (if (or (and (eq jove-J-OTAG out)
+                   (eq jove-SLASH prev-tt))
+              (eq jove-J-CTAG out))
+          (progn
+            (pop jove--ctx-stack)
+            (setq jove--expr-allowed (eq jove-J-EXPR (jove-current-ctx))))
+        (setq jove--expr-allowed t))))
    ;; Otherwiser `jove-expr-allowed' is set to token type slot 'before-expr'.
    (t
     (setq jove--expr-allowed (jove-tt-before-expr tt)))))
+
+(defun jove-in-generator-ctx ()
+  (let ((head (car jove--ctx-stack))
+        (tail (cdr jove--ctx-stack)))
+    (while (and head
+                (not (string-equal "function" (jove-ctx-token head))))
+      (setq head (car tail)
+            tail (cdr tail)))
+    (and head
+         (jove-ctx-is-generator head))))
 
 ;;; Token Reading Functions
 
