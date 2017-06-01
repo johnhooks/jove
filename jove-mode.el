@@ -4,8 +4,8 @@
 
 ;; Auther: John Hooks
 ;; URL: https://github.com/johnhooks/jove
-;; Version: 0.2.0
-;; Package-Requires: ((js "9"))
+;; Version: 0.3.0
+;; Package-Requires: ((emacs "25.1"))
 ;; Keywords: languages, javascript
 
 ;; This file is part of Jove Mode.
