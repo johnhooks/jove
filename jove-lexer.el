@@ -382,9 +382,9 @@ pairs collected in OPTIONS."
 
 ;; JSX Context Types
 
-(defvar jove-j-otag (jove-make-ctx "<tag>"))
-(defvar jove-j-ctag (jove-make-ctx "</tag>"))
-(defvar jove-j-expr (jove-make-ctx "<tag>...</tag>" :is-expr t))
+(defvar jove-J-OTAG (jove-make-ctx "<tag>"))
+(defvar jove-J-CTAG (jove-make-ctx "</tag>"))
+(defvar jove-J-EXPR (jove-make-ctx "<tag>...</tag>" :is-expr t))
 
 ;;; Token
 
