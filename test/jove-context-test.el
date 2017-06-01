@@ -234,6 +234,14 @@
   (jove-BRACE-L (list jove-B-EXPR jove-B-STAT) :prev jove-COMMA)
   (setq jove--expr-allowed t))
 
+(jove-deftest-ctx-stack brace-l-jsx-j-otag
+  (jove-BRACE-L (list jove-B-EXPR jove-J-OTAG jove-B-STAT))
+  (setq jove--ctx-stack (cons jove-J-OTAG jove--ctx-stack)))
+
+(jove-deftest-ctx-stack brace-l-jsx-j-expr
+  (jove-BRACE-L (list jove-B-TMPL jove-J-EXPR  jove-B-STAT))
+  (setq jove--ctx-stack (cons jove-J-EXPR jove--ctx-stack)))
+
 ;;; Update Context jove-BRACE-R
 ;; Note: jove-PAREN-R is updated the same as jove-BRACE-R.
 
@@ -412,6 +420,16 @@
 ;; <parent><child></child|></parent>
 (jove-deftest-ctx-update jsx-tag-end-j-ctag-inside-j-expr
   (jove-JSX-TAG-END t :push (jove-J-EXPR jove-J-EXPR jove-J-CTAG)))
+
+;; </>
+(jove-deftest jsx-slash-after-tag-start
+  (setq jove--ctx-stack (cons jove-J-OTAG
+                          (cons jove-J-EXPR
+                                jove--ctx-stack))
+        jove--expr-allowed t)
+  (jove-update-ctx jove-SLASH jove-JSX-TAG-START)
+  (should (eq nil jove--expr-allowed))
+  (should (equal (list jove-J-CTAG jove-B-STAT) jove--ctx-stack)))
 
 ;; For the remaining token types, the 'before-expr' slot is used to
 ;; update the lexer state 'ctx-stack' slot.

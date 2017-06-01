@@ -384,7 +384,7 @@ pairs collected in OPTIONS."
 
 (defvar jove-J-OTAG (jove-make-ctx "<tag>"))
 (defvar jove-J-CTAG (jove-make-ctx "</tag>"))
-(defvar jove-J-EXPR (jove-make-ctx "<tag>...</tag>" :is-expr t))
+(defvar jove-J-EXPR (jove-make-ctx "<tag>...</tag>" :is-expr t :preserve-space t))
 
 ;;; Token
 
@@ -574,7 +574,7 @@ When a newline is encountered, `jove--newline-before' is set to t and
          ((eq ?\C-j first)
           (forward-char)
           (setq jove--linum (1+ jove--linum)))
-         (t                             ; Includes eob.
+         (t                             ; Hit eob.
           (throw 'whitespace nil)))))
     ;; TODO: Implement a newline event function.
     (setq jove--newline-before (< prev-linum jove--linum))))
@@ -628,10 +628,12 @@ modified to reflect the change of `jove--prev-tt'."
     (setq jove--expr-allowed nil))
    ;; '{'  Enter brace statement, expression context.
    ((eq jove-BRACE-L tt)
-    (push (if (jove-brace-is-block-p prev-tt)
-              jove-B-STAT
-            jove-B-EXPR)
-          jove--ctx-stack)
+    (let ((top (jove-current-ctx)))
+      (push (cond ((eq jove-J-OTAG top) jove-B-EXPR)
+                  ((eq jove-J-EXPR top) jove-B-TMPL)
+                  ((jove-brace-is-block-p prev-tt) jove-B-STAT)
+                  (t jove-B-EXPR))
+            jove--ctx-stack))
     (setq jove--expr-allowed t))
    ;; '}' or ')'  Exit either brace or paren context.
    ((memq tt (list jove-BRACE-R jove-PAREN-R))
@@ -697,6 +699,13 @@ modified to reflect the change of `jove--prev-tt'."
             (pop jove--ctx-stack)
             (setq jove--expr-allowed (eq jove-J-EXPR (jove-current-ctx))))
         (setq jove--expr-allowed t))))
+   ((and (eq jove-SLASH tt)
+         (eq jove-JSX-TAG-START prev-tt))
+    ;; NOTE: Quoted from acorn-jsx/inject.js
+    ;; Do not consider JSX expr -> JSX open tag -> ... anymore
+    (setq jove--ctx-stack (cons jove-J-CTAG
+                            (cdr (cdr jove--ctx-stack)))
+          jove--expr-allowed nil))
    ;; Otherwiser `jove-expr-allowed' is set to token type slot 'before-expr'.
    (t
     (setq jove--expr-allowed (jove-tt-before-expr tt)))))
@@ -1041,7 +1050,7 @@ eol or eof is reached before the matching delimiter."
   (let (char)
     (catch 'token
       (while t
-        (re-search-forward "[^`$\\\\]*" nil t)
+        (re-search-forward "[^`$\\\\\C-j]*" nil t)
         (setq char (char-after))
         (cond
          ((eq ?\` char)
@@ -1072,7 +1081,12 @@ eol or eof is reached before the matching delimiter."
             (forward-char)))
          ((eq ?\\ char)
           (jove-read-escape-char))
-         (t                             ; Hit eof.
+         ;; TODO: Write a test to insure linum is incremented.
+         ((eq ?\C-j char)
+          ;; Increment line number.
+          (setq jove--linum (1+ jove--linum))
+          (forward-char))
+         (t                             ; Hit eob.
           ;; Don't run the template hook because this isn't a real template literal.
           (jove-warn jove--start (point-max) "Missing template string closing delimiter")
           (jove-finish-token jove-TEMPLATE)
@@ -1130,6 +1144,7 @@ eol or eof is reached before the matching delimiter."
 
 (defun jove-read-word ()
   "Read from buffer an ECMAScript Identifier Name or Keyword."
+  (setq jove--contains-esc nil)
   (let ((word (jove-read-word-internal))
         (tt jove-NAME))
     (when word
@@ -1143,6 +1158,66 @@ eol or eof is reached before the matching delimiter."
       (jove-set-face jove--start jove--end 'font-lock-builtin-face))
      ((jove-tt-is-keyword jove--tt)
       (jove-set-face jove--start jove--end 'font-lock-keyword-face)))))
+
+(defun jove-jsx-read-token ()
+  (let (char
+        (looking t))
+    (while looking
+      (re-search-forward "[^<{\C-j}]*")
+      (setq char (char-after))
+      (cond
+       ((or (eq ?< char)
+            (eq ?{ char))
+        (if (= jove--start (point))
+            (if (and (eq ?< char) jove--expr-allowed)
+                (progn
+                  (forward-char)
+                  (jove-finish-token jove-JSX-TAG-START))
+              ;; Read as a regular token.
+              (jove-read-token char))
+          (jove-finish-token jove-JSX-TEXT))
+        (setq looking nil))
+       ;; Is parsing entities necessary? Might be helpful to hightlight them.
+       ;; ((eq ?& char)
+       ;;  (jove-read-entity))
+       ((eq ?\C-j char)
+        (forward-char)
+        (setq jove--linum (1+ jove--linum)))
+       (t                               ; Hit eob.
+        (setq looking nil)
+        ;; Is it necessary to finish the token in anyway?
+        (jove-warn jove--start (point) "Unterminated JSX contents"))))))
+
+(defun jove-jsx-read-string (punc)
+  ;; Not doing anything with the html entities.
+  (let (char
+        (regexp (if (eq ?\' punc) "[^'\C-j]*" "[^\"\C-j]*"))
+        (looking t))
+    (while looking
+      (re-search-forward regexp nil t)
+      (setq char (char-after))
+      (cond
+       ((eq punc char)
+        (forward-char)
+        (setq looking nil))
+       ((eq ?\C-j char)
+        ;; Increment line number.
+        (setq jove--linum (1+ jove--linum))
+        (forward-char))
+       (t                               ; Hit eob.
+        (setq looking nil)
+        (jove-warn jove--start (point) "Missing string closing delimiter"))))
+    ;; Finish as a regular string token type.
+    (jove-finish-token jove-STRING)))
+
+(defun jove-jsx-read-word ()
+  ;; First character will have already be checked for an
+  ;; identifier start character.
+  (let ((start (point)))
+    (while (or (< 0 (skip-syntax-forward "w_"))
+               (and (eq ?- (char-after))
+                    (progn (forward-char) t))))
+    (jove-finish-token jove-JSX-NAME (buffer-substring-no-properties start (point)))))
 
 (defun jove-read-token (char)
   "Read token using provided first CHAR."
@@ -1201,13 +1276,35 @@ eol or eof is reached before the matching delimiter."
     ;; Initialize current token state.
     (setq jove--start (point)
           jove--value nil
-          jove--contains-esc nil
           char (char-after))
     (cond
      ((eobp)
       (jove-finish-token jove-EOB))
      ((jove-ctx-override ctx)
       (funcall (jove-ctx-override ctx)))
+
+     ;; JSX additions
+     ((eq jove-J-EXPR ctx)
+      (jove-jsx-read-token))
+     ((or (eq jove-J-OTAG ctx)
+          (eq jove-J-CTAG ctx))
+      (cond
+       ((eq ?w (char-syntax char))
+        (jove-jsx-read-word))
+       ((eq ?> char)
+        (forward-char)
+        (jove-finish-token jove-JSX-TAG-END))
+       ((or (eq ?\" char)
+            (eq ?\' char))
+        (jove-jsx-read-string char))
+       ((and (eq ?< char)
+             jove--expr-allowed
+             (not (eq ?\! (jove-peek-char)))) ; <!
+        (forward-char)
+        (jove-finish-token jove-JSX-TAG-START))))
+
+     ;; Continuation of standard JavaScript tokens'
+
      ((or (memq (char-syntax char) '(?w ?\\)))
       (jove-read-word))
      (t
