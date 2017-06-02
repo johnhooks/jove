@@ -1782,6 +1782,9 @@ and closing tag."
                (concat "Expected corresponding JSX closing tag for <"
                        (jove-get-qualified-jsx-name (car (jove-children opening)))
                        ">"))))
+    (while (and (eq jove-RELATIONAL jove--tt)
+                (string= "<" (jove-token-raw)))
+      (jove-signal "Invalid adjacent JSX elements" :start jove--start :end jove--end))
     (jove-finish node 'jsx-element)))
 
 (defun jove-jsx-parse-text ()
@@ -1837,7 +1840,7 @@ and closing tag."
           ;; FIX: Does setq need to be used, `jove-ast' should be mutated in
           ;; place
           (setq jove-ast (jove-parse-top-level jove-ast)))
-        (when (and jove-verbose)
+        (when jove-verbose
           (let ((time (/ (truncate (* (- (float-time) start-time)
                                       10000))
                          10000.0)))

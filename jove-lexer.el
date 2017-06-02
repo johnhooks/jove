@@ -101,11 +101,12 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
 
 (defun jove-set-face (start end face)
   "Queue region START to END for fontification using FACE."
-  (setq start (min (point-max) start)
-        start (max (point-min) start)
-        end (min (point-max) end)
-        end (max (point-min) end))
-  (push (list start end 'font-lock-face face) jove--fontifications))
+  (when jove-fontify                        ; Kluge.  Should move fontification out of lexer.
+    (setq start (min (point-max) start)
+          start (max (point-min) start)
+          end (min (point-max) end)
+          end (max (point-min) end))
+    (push (list start end 'font-lock-face face) jove--fontifications)))
 
 (defsubst jove-set-face* (object face)
   "Queue region from OBJECT for fontification using FACE.
@@ -1340,10 +1341,10 @@ eol or eof is reached before the matching delimiter."
           jove--token-cache '()))
   (goto-char jove--end))
 
-(defun jove-flush-lexer-cache ()
+(defun jove-flush-lexer-cache (position)
   "Flush the token cache to a position before the last edit."
   (while (and jove--cache
-              (< jove--cache-end (car (cdr (car jove--cache)))))
+              (< position (car (cdr (car jove--cache)))))
     (setq jove--cache (cdr jove--cache)))
   (setq jove--cache-end (if jove--cache
                         (car (cdr (car jove--cache)))
@@ -1351,6 +1352,16 @@ eol or eof is reached before the matching delimiter."
 
 ;; Need to really think though the process of caching the tokens
 ;; and how to resume once the cache is used up.
+
+;; For right not the cache will not be used by the parser...
+
+(defun jove-lex-query (pos)
+  "Query the lexer cache for a lexer state before pos."
+  (let ((cache jove--cache))
+    (while (and cache
+                (< pos (car (cdr (car cache))))) ; End position
+      (setq cache (cdr cache)))
+    cache))
 
 (defun jove-lex ()
   "Tokenize buffer contents as JavaScript."
@@ -1373,6 +1384,32 @@ eol or eof is reached before the matching delimiter."
                          10000.0)))
             (message "Lexer finished in %0.3fsec, count %d" time (length jove--cache)))))
       (setq jove--cache-end (point)))))
+
+(defun jove-lex-to (&optional position)
+  "Tokenize buffer contents as JavaScript."
+  ;; NOTE: This function is just for testing the speed of the lexer.
+  (let ((start-time (float-time))
+        (jove-fontify nil))
+    (jove-flush-lexer-cache position)
+    (save-restriction
+      (widen)
+      (save-excursion
+        (if (car jove--cache)
+            (jove-config-lexer (car jove--cache))
+          ;; Kludge to handle the need of the lexer to start after `jove-BOB'.
+          (jove-config-lexer)
+          (jove-next-token)
+          (push (jove-copy-lexer-state) jove--cache))
+        (save-match-data
+          (while (and (not (eq jove-EOB jove--tt))
+                      (<= jove--end position))
+            (jove-next-token)
+            (push (jove-copy-lexer-state) jove--cache))
+          (let ((time (/ (truncate (* (- (float-time) start-time)
+                                      10000))
+                         10000.0)))
+            (message "Lexer finished in %0.3fsec, count %d" time (length jove--cache))))
+        (setq jove--cache-end (or (car (car jove--cache)) 0))))))
 
 (defun jove-find-closing-paren ()
   "Find a closing parenthesis.
