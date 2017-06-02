@@ -1485,8 +1485,8 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
               is-async nil
               is-static nil
               is-maybe-static (eq jove-STATIC jove--tt)
-              is-generator (jove-eat* jove-STAR 'font-lock-keyword-face)) ; Highlight if '*'.
-        (jove-parse-property-name method)
+              is-generator (jove-eat* jove-STAR 'font-lock-keyword-face) ; Highlight if '*'.
+              method-name (jove-parse-property-name method))
         (jove-set-prop method :static
                    (setq is-static (and is-maybe-static
                                         (not (eq jove-PAREN-L jove--tt))
@@ -1499,7 +1499,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
           ;; Don't care if is-generator was already assigned before.
           (setq is-generator (jove-eat* jove-STAR 'font-lock-keyword-face)) ; Highlight if '*'.
           ;; Reparse method key.
-          (jove-parse-property-name method))
+          (setq method-name (jove-parse-property-name method)))
 
         (when (and (not is-generator)
                    (not (eq jove-PAREN-L jove--tt))
@@ -1520,7 +1520,10 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
                  ;; Get rid of 'async', 'get' or 'set' as first child.
                  (jove-set-children method '())
                  ;; Reparse method key.
-                 (jove-parse-property-name method))))
+                 (setq method-name (jove-parse-property-name method)))))
+
+        (unless (jove-get-prop method-name :computed)
+          (jove-set-face* method-name 'font-lock-function-name-face))
 
         (jove-add-child body (jove-finish (jove-add-child method
                                               (jove-parse-method is-generator
@@ -1614,7 +1617,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
         (when (jove-eat jove-AS)
           (jove-set-face jove--start jove--end 'font-lock-keyword-face)
           (when (eq jove-NAME jove--tt)
-            (jove-set-face* jove--start jove--end 'font-lock-variable-name-face)
+            (jove-set-face jove--start jove--end 'font-lock-variable-name-face)
             (jove-add-child spec (jove-parse-identifier))))
         (jove-finish spec 'import-namespace-specifier)
         (jove-add-child node spec))
