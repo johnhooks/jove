@@ -1699,18 +1699,25 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
   "Parse a JSX attribute."
   (let ((node (jove-make-node)))
     (if (jove-eat jove-BRACE-L)
-        (progn
-          (jove-expect jove-ELLIPSIS)
-          (jove-add-child node (jove-parse-maybe-assign))
+        ;; Allow invalid input.
+        (cond
+         ((eq jove-BRACE-R jove--tt)
+          (jove-add-child node (jove-jsx-parse-empty-expression))
           (jove-expect jove-BRACE-R))
+         ((jove-eat jove-ELLIPSIS)
+          (jove-add-child node (unless (eq jove-BRACE-R jove--tt)
+                             (jove-parse-maybe-assign)))
+          (jove-expect jove-BRACE-R))
+         (t
+          (jove-unexpected)))
       (let ((name (jove-jsx-parse-namespaced-name)))
         (if (eq 'jsx-identifier (jove-type name))
             (let ((value (jove-get-prop name :value))
                   (case-fold-search nil))
               ;; Fontify as regular attribute if starts with lowercase.
               (if (string-match "^[a-z]" value)
-                  (jove-set-face* name 'web-mode-html-attr-name-face)
-                (jove-set-face* name 'web-mode-html-tag-face)))
+                  (jove-set-face* name 'font-lock-variable-name-face)
+                (jove-set-face* name 'font-lock-function-name-face)))
           (jove-fontify-jsx-tag-name name))
         (jove-add-children node
                        name
@@ -1784,7 +1791,7 @@ and closing tag."
 
 (defun jove-jsx-parse-element ()
   (let ((start-pos jove--start))
-    (jove-next)
+    (jove-next)                             ; Move over '<'
     (jove-jsx-parse-element-at start-pos)))
 
 (defun jove-get-qualified-jsx-name (object)
@@ -1800,16 +1807,16 @@ and closing tag."
       (concat (jove-get-qualified-jsx-name (car (jove-children object))) "."
               (jove-get-qualified-jsx-name (car (cdr (jove-children object)))))))))
 
-(defun jove-fontify-jsx-tag-name (object &optional chainp)
+(defun jove-fontify-jsx-tag-name (object &optional chainp namespacep)
   "Transform JSX element name to string."
   (let ((type (jove-type object)))
     (cond
      ((eq 'jsx-identifier type)
-      (jove-set-face* object (if chainp
-                             'js2-object-property
-                           'web-mode-html-tag-face)))
+      (jove-set-face* object (cond (chainp 'js2-object-property)
+                               (namespacep 'font-lock-type-face)
+                               (t 'font-lock-function-name-face))))
      ((eq 'jsx-namespaced-name type)
-      (jove-fontify-jsx-tag-name (car (jove-children object)))
+      (jove-fontify-jsx-tag-name (car (jove-children object)) nil t)
       (jove-fontify-jsx-tag-name (car (cdr (jove-children object)))))
      ((eq 'jsx-member-expression type)
       (jove-fontify-jsx-tag-name (car (jove-children object)) chainp)
