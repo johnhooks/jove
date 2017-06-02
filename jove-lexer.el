@@ -79,8 +79,6 @@ and newline.")
 Match all characters excluding the escape character, double quote
 and newline.")
 
-;;; TODO: Move these to some where else.
-
 (defsubst jove-clear-face (start end)
   "Remove face properties from START to END."
   (remove-text-properties start end '(font-lock-face nil)))

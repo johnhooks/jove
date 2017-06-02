@@ -207,8 +207,7 @@ Buffer edit spans from BEG to END and is of length LEN."
   (setq-local electric-layout-rules
               '((?\; . after) (?\{ . after) (?\} . before)))
 
-  (when jove-mode-reparse-on-edit
-    (jove--reset-timer)))
+  (jove--reparse t))
 
 (provide 'jove-mode)
 

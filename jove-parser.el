@@ -1470,6 +1470,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
   (let ((key nil)
         (key-value)
         (method nil)
+        (method-name nil)
         (body (jove-make-node))
         (is-generator nil)
         (is-async nil)

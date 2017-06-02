@@ -51,6 +51,12 @@
   :type 'boolean
   :group 'jove-mode)
 
+(defcustom jove-fontify t
+  "Fontify buffer from buffer data."
+  :type 'boolean
+  :group 'jove-mode)
+(make-variable-buffer-local 'jove-fontify)
+
 (defcustom jove-idle-timer-delay 0.20
   "Delay in secs before re-parsing after user makes changes."
   :type 'number
