@@ -206,17 +206,18 @@
 (jove-deftest-lexer op-greater-than-or-equal
   ">=" jove-RELATIONAL :length 2)
 
+;; '<' Will be interpreted as JSX unless expression is not allowed.
 (jove-deftest-lexer op-less-than
-  "<" jove-RELATIONAL :length 1)
+  "foo <" jove-RELATIONAL :start 5 :length 1 :depth 2)
 
 (jove-deftest-lexer op-less-than-or-equal
-  "<=" jove-RELATIONAL :length 2)
+  "foo <=" jove-RELATIONAL :start 5 :length 2 :depth 2)
 
 (jove-deftest-lexer op-bitshift-left
-  "<<" jove-BITSHIFT :length 2)
+  "foo <<" jove-BITSHIFT :start 5 :length 2 :depth 2)
 
 (jove-deftest-lexer op-bitshift-left-assign
-  "<<=" jove-ASSIGN :length 3)
+  "foo <<=" jove-ASSIGN :start 5 :length 3 :depth 2)
 
 (jove-deftest-lexer op-bitshift-right
   ">>" jove-BITSHIFT :length 2)
@@ -449,6 +450,7 @@
 (jove-deftest-lexer jsx-tag-end
   "foo=<Foo>" jove-JSX-TAG-END :start 9 :length 1 :depth 5)
 
+;; NOTE: the equality symbol is not tokenized.
 (jove-deftest-lexer jsx-text
   "foo=<Foo>bar = qux<" jove-JSX-TEXT :start 10 :length 9 :depth 6)
 
@@ -466,6 +468,9 @@
 
 (jove-deftest-lexer jsx-b-pop
   "foo=<Foo bar={qux, bax} />" jove-JSX-TAG-END :start 26 :length 1 :depth 13)
+
+(jove-deftest-lexer jsx-string
+  "foo=<Foo bar=\"Foo who?\" />" jove-STRING :start 14 :length 10 :depth 7)
 
 ;;; Keywords
 

@@ -677,6 +677,10 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
       (jove-parse-new))
      ((eq jove-BACKQUOTE tt)
       (jove-parse-template))
+     ((eq jove-JSX-TEXT tt)
+      (jove-jsx-parse-text))
+     ((eq jove-JSX-TAG-START tt)
+      (jove-jsx-parse-element))
      (t
       (jove-unexpected)))))
 
@@ -759,8 +763,12 @@ are allowed."
     (jove-add-child node (setq elt (jove-parse-template-element)))
     (while (not (jove-get-prop elt :tail))
       (jove-expect jove-DOLLAR-BRACE-L)
-      (jove-add-child node (jove-parse-expression))
-      (jove-expect jove-BRACE-R)
+      (if (eq jove-BRACE-R jove--tt)
+          (progn
+            (jove-add-child node (jove-make-node jove--prev-end jove--prev-start 'null-expression))
+            (jove-next))
+        (jove-add-child node (jove-parse-expression))
+        (jove-expect jove-BRACE-R))
       (jove-add-child node (setq elt (jove-parse-template-element))))
     (jove-next)                             ; Move over '`'
     (jove-finish node 'template-literal)))
@@ -1625,6 +1633,187 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
           (jove-add-child node spec))
         (jove-next)))                       ; Move over '}'
     node))                              ; Return NODE.
+
+(defun jove-jsx-parse-identitier ()
+  "Parse JSX identifier."
+  (let ((node (jove-make-node)))
+    (cond
+     ((eq jove-JSX-NAME jove--tt)
+      (jove-set-prop node :value jove--value))
+     ((jove-tt-is-keyword jove--tt)
+      (jove-set-prop :value (jove-tt-label jove--tt)))
+     (t
+      (jove-unexpected)))
+    (jove-next)
+    (jove-finish node 'jsx-identifier)))
+
+(defun jove-jsx-parse-namespaced-name ()
+  "Parse JSX namespaced identifier."
+  (let ((start-pos jove--start)
+        (name (jove-jsx-parse-identitier)))
+    (if (jove-eat jove-COLON)
+        (jove-finish (jove-add-children (jove-make-node start-pos)
+                                name
+                                (jove-jsx-parse-identitier))
+                 'jsx-namespaced-name)
+      name)))
+
+(defun jove-jsx-parse-element-name ()
+  "Parse JSX element name."
+  (let ((start-pos jove--start)
+        (node (jove-jsx-parse-namespaced-name)))
+    (while (jove-eat jove-DOT)
+      (setq node (jove-finish (jove-add-children (jove-make-node start-pos)
+                                         node
+                                         (jove-jsx-parse-identitier))
+                          'jsx-member-expression)))
+    node))
+
+(defun jove-jsx-parse-attribute-value ()
+  "Parse JSX attribute value."
+  (cond
+   ((eq jove-BRACE-L jove--tt)
+    (jove-jsx-parse-expression-container))
+   ((or (eq jove-JSX-TAG-START jove--tt)
+        (eq jove-STRING jove--tt))
+    (jove-parse-expr-atom))
+   (t
+    (jove-unexpected :jsx-value-not-brace-expr-or-string))))
+
+(defun jove-jsx-parse-empty-expression ()
+  "Parse an empty JSX expression."
+  ;; <tag>|...|</tag>
+  (jove-make-node jove--prev-end jove--start 'jsx-empty-expression))
+
+(defun jove-jsx-parse-expression-container ()
+  "Parse a JSX expression container."
+  (let ((node (jove-make-node)))
+    (jove-next)                             ; Move over '{'
+    (jove-add-child node (if (eq jove-BRACE-R jove--tt)
+                         (jove-jsx-parse-empty-expression)
+                       (jove-parse-expression)))
+    (jove-expect jove-BRACE-R)
+    (jove-finish node 'jsx-expression-container)))
+
+(defun jove-jsx-parse-attribute ()
+  "Parse a JSX attribute."
+  (let ((node (jove-make-node)))
+    (if (jove-eat jove-BRACE-L)
+        (progn
+          (jove-expect jove-ELLIPSIS)
+          (jove-add-child node (jove-parse-maybe-assign))
+          (jove-expect jove-BRACE-R))
+      (let ((name (jove-jsx-parse-namespaced-name)))
+        (if (eq 'jsx-identifier (jove-type name))
+            (let ((value (jove-get-prop name :value))
+                  (case-fold-search nil))
+              ;; Fontify as regular attribute if starts with lowercase.
+              (if (string-match "^[a-z]" value)
+                  (jove-set-face* name 'web-mode-html-attr-name-face)
+                (jove-set-face* name 'web-mode-html-tag-face)))
+          (jove-fontify-jsx-tag-name name))
+        (jove-add-children node
+                       name
+                       (when (jove-eat jove-EQ)
+                         (jove-jsx-parse-attribute-value)))))
+    (jove-finish node 'jsx-attribute)))
+
+(defun jove-jsx-parse-opening-element-at (start-pos)
+  "Parse JSX opening tag."
+  ;; Starting after '<'
+  (let ((node (jove-make-node start-pos))
+        (name (jove-jsx-parse-element-name)))
+    (jove-fontify-jsx-tag-name name)
+    (jove-add-child node name)
+    (while (and (not (eq jove-SLASH jove--tt))
+                (not (eq jove-JSX-TAG-END jove--tt)))
+      (jove-add-child node (jove-jsx-parse-attribute)))
+    (jove-set-prop node :self-closing (jove-eat jove-SLASH))
+    (jove-expect jove-JSX-TAG-END)
+    (jove-finish node 'jsx-opening-element)))
+
+(defun jove-jsx-parse-closing-element-at (start-pos)
+  "Parse JSX closing element."
+  ;; Starting after '</'
+  (let ((node (jove-make-node start-pos))
+        (name (jove-jsx-parse-element-name)))
+    (jove-fontify-jsx-tag-name name)
+    (jove-add-child node name)
+    (jove-expect jove-JSX-TAG-END)
+    (jove-finish node 'jsx-closing-element)))
+
+(defun jove-jsx-parse-element-at (start-pos)
+  "Parse entire JSX element.
+Inludes opening tag (starting after '<'), attributes, contents
+and closing tag."
+  (let ((node (jove-make-node start-pos))
+        (opening (jove-jsx-parse-opening-element-at start-pos))
+        (closing nil))
+    (jove-add-child node opening)
+    (when (not (jove-get-prop opening :self-closing))
+      (catch 'contents
+        (while t
+          (cond
+           ((eq jove-JSX-TAG-START jove--tt)
+            (setq start-pos jove--start)
+            (jove-next)
+            (when (jove-eat jove-SLASH)
+              (setq closing (jove-jsx-parse-closing-element-at start-pos))
+              (throw 'contents nil))
+            (jove-add-child node (jove-jsx-parse-element-at start-pos)))
+           ((eq jove-JSX-TEXT jove--tt)
+            (jove-add-child node (jove-parse-expr-atom)))
+           ((eq jove-BRACE-L jove--tt)
+            (jove-add-child node (jove-jsx-parse-expression-container)))
+           (t
+            (jove-unexpected)))))
+      (jove-add-child node closing)
+      (when (not (string= (jove-get-qualified-jsx-name (car (jove-children closing)))
+                          (jove-get-qualified-jsx-name (car (jove-children opening)))))
+        (jove-warn (jove-start closing)
+               (jove-end closing)
+               (concat "Expected corresponding JSX closing tag for <"
+                       (jove-get-qualified-jsx-name (car (jove-children opening)))
+                       ">"))))
+    (jove-finish node 'jsx-element)))
+
+(defun jove-jsx-parse-text ()
+  "Return literal JSX text element."
+  (prog1 (jove-make-node jove--start jove--end 'jsx-text)
+    (jove-next)))
+
+(defun jove-jsx-parse-element ()
+  (let ((start-pos jove--start))
+    (jove-next)
+    (jove-jsx-parse-element-at start-pos)))
+
+(defun jove-get-qualified-jsx-name (object)
+  "Transform JSX element name to string."
+  (let ((type (jove-type object)))
+    (cond
+     ((eq 'jsx-identifier type)
+      (jove-get-prop object :value))
+     ((eq 'jsx-namespaced-name type)
+      (concat (jove-get-prop (car (jove-children object)) :value) ":"
+              (jove-get-prop (car (cdr (jove-children object))) :value)))
+     ((eq 'jsx-member-expression type)
+      (concat (jove-get-qualified-jsx-name (car (jove-children object))) "."
+              (jove-get-qualified-jsx-name (car (cdr (jove-children object)))))))))
+
+(defun jove-fontify-jsx-tag-name (object &optional chainp)
+  "Transform JSX element name to string."
+  (let ((type (jove-type object)))
+    (cond
+     ((eq 'jsx-identifier type)
+      (jove-set-face* object (if chainp
+                             'js2-object-property
+                           'web-mode-html-tag-face)))
+     ((eq 'jsx-namespaced-name type)
+      (jove-fontify-jsx-tag-name (car (jove-children object)))
+      (jove-fontify-jsx-tag-name (car (cdr (jove-children object)))))
+     ((eq 'jsx-member-expression type)
+      (jove-fontify-jsx-tag-name (car (jove-children object)) chainp)
+      (jove-fontify-jsx-tag-name (car (cdr (jove-children object))) t)))))
 
 (defun jove-parse ()
   "Run the Jove parser."

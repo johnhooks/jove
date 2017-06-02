@@ -1208,7 +1208,8 @@ eol or eof is reached before the matching delimiter."
         (setq looking nil)
         (jove-warn jove--start (point) "Missing string closing delimiter"))))
     ;; Finish as a regular string token type.
-    (jove-finish-token jove-STRING)))
+    (jove-finish-token jove-STRING)
+    (jove-set-face jove--start jove--end 'font-lock-string-face)))
 
 (defun jove-jsx-read-word ()
   ;; First character will have already be checked for an
@@ -1296,6 +1297,7 @@ eol or eof is reached before the matching delimiter."
         (jove-finish-token jove-JSX-TAG-END))
        ((or (eq ?\" char)
             (eq ?\' char))
+        (forward-char)
         (jove-jsx-read-string char))
        (t
         ;; Kluge
