@@ -39,11 +39,11 @@
 
 ;; Buffer Local Global Scratch Variables
 
-(defvar-local jove--commment-start -1
+(defvar-local jove--comment-start -1
   "The start position of the comment.
 A scratch variable.")
 
-(defvar-local jove--commment-end -1
+(defvar-local jove--comment-end -1
   "The end position of the comment.
 A scratch variable.")
 
@@ -99,39 +99,6 @@ and newline.")
   "A regular expression for reading double quote strings.
 Match all characters excluding the escape character, double quote
 and newline.")
-
-(defsubst jove-clear-face (start end)
-  "Remove face properties from START to END."
-  (remove-text-properties start end '(font-lock-face nil)))
-
-(defun jove-apply-fontifications (start end &optional no-clear)
-  "Apply fontifications from START to END.
-Boolean NO-CLEAR flag prevents clearing faces before application."
-  (with-silent-modifications
-    (unless no-clear (jove-clear-face start end))
-    (mapc #'(lambda (f)
-              (apply #'put-text-property f))
-          (nreverse jove--fontifications))  ; Allows applying over those previously pushed.
-    (mapc #'(lambda (f)
-              (put-text-property (nth 0 f) (nth 1 f) 'font-lock-face font-lock-warning-face))
-          jove--warnings)
-    (setq jove--fontifications nil
-          jove--warnings nil)))     ; Probably shouldn't reset here.
-
-(defun jove-set-face (start end face)
-  "Queue region START to END for fontification using FACE."
-  (when jove-fontify                        ; Kluge.  Should move fontification out of lexer.
-    (setq start (min (point-max) start)
-          start (max (point-min) start)
-          end (min (point-max) end)
-          end (max (point-min) end))
-    (push (list start end 'font-lock-face face) jove--fontifications)))
-
-(defsubst jove-set-face* (object face)
-  "Queue region from OBJECT for fontification using FACE.
-Both nodes and tokens use zero index for the start position and
-the first index for the end position."
-  (jove-set-face (nth 0 object) (nth 1 object) face))
 
 ;;; Token Types
 
@@ -749,13 +716,14 @@ modified to reflect the change of `jove--prev-tt'."
 
 ;;; Token Reading Functions
 
-(defun jove-finish-token (tt &optional value)
+(defun jove-finish-token (tt &optional face value)
   "Finish token of type TT and update the syntactic context.
 Optionally set the token VALUE, otherwise set it to nil."
   (let ((prev-tt jove--tt))
     (setq jove--end (point)
           jove--tt tt
-          jove--value value)
+          jove--value value
+          jove--face face)
     ;; Finishing the token before updating the ctx allows all
     ;; token data to be referenced in the stored context.
     (jove-update-ctx tt prev-tt)))
@@ -767,7 +735,10 @@ Optionally set the token VALUE, otherwise set it to nil."
 
 (defun jove-finish-op (tt size)
   "Finish operator token of type TT and SIZE."
-  (goto-char (+ (point) size))
+  ;; TODO: Could `forward-char' be used? All characters to be skipped
+  ;; over have already been confirmed to exist.
+  (forward-char size)
+  ;; (goto-char (+ (point) size))
   (jove-finish-token tt))
 
 (defun jove-read-token-dot ()
@@ -962,16 +933,16 @@ otherwise nil."
          (t
           (jove-warn jove--start (point) "Missing regex delimiter")
           (throw 'regexp nil))))))
-  (jove-finish-token jove-REGEXP)
-  (jove-set-face jove--start jove--end 'font-lock-string-face))
+  (jove-finish-token jove-REGEXP 'font-lock-string-face))
 
 (defun jove-read-regexp-extras ()
   "Read regular expression with extra fontifications."
   (forward-char)                        ; Move over opening delimiter.
+  (setq jove--face '())                     ; Make sure `jove--face' is empty.
   (let ((char nil)
+        (pos 0)                         ; Scratch to minimize use of `point'
         (in-paren '())
         (in-curly nil)
-        (fontifies '())
         (face 'font-lock-regexp-grouping-construct))
     (catch 'regexp
       (while t
@@ -999,11 +970,14 @@ otherwise nil."
          ((eq ?\[ char)
           (forward-char)
           ;; Maybe fontify the character class negation.
-          (if (looking-at-p "\\^")
-              (push (list  (1- (point)) (1+ (point)) face) fontifies)
-            (push (list (1- (point)) (point) face) fontifies))
+          (push (list (1- (setq pos (point)))
+                      (if (looking-at-p "\\^")
+                          (1+ pos)
+                        pos)
+                      face)
+                jove--face)
           (if (jove-read-regexp-class)
-              (push (list  (1- (point)) (point) face) fontifies)
+              (push (list  (1- (setq pos (point))) pos face) jove--face)
             ;; Hit eol or eof, finish and warn.
             (jove-warn jove--start (point) "missing regex delimiter")
             (throw 'regexp 'nil)))
@@ -1014,11 +988,17 @@ otherwise nil."
                            (save-excursion
                              (forward-char)
                              (when (looking-at "\\?[:=!]")
-                               (push (list (point) (+ (point) 2) face) fontifies)))))
+                               (push (list (setq pos (point))
+                                           (+ pos 2)
+                                           face)
+                                     jove--face)))))
                     (and (eq ?\) char)
                          (pop in-paren))
                     (memq char '(?^ ?$ ?* ?+ ?? ?. ?|)))
-            (push (list (point) (1+ (point)) face) fontifies))
+            (push (list (setq pos (point))
+                        (1+ pos)
+                        face)
+                  jove--face))
           (forward-char))
          ;; Found opening curley grouping construct.
          ((eq ?\{ char)
@@ -1028,17 +1008,15 @@ otherwise nil."
          ;; Found closing curley grouping construct.
          ((eq ?\} char)
           (when in-curly
-            (push (list in-curly (1+ (point)) face) fontifies)
+            (push (list in-curly (1+ (point)) face) jove--face)
             (setq in-curly nil))
           (forward-char))
          ;; Hit eol or eof, signal error.
          (t
           (jove-warn jove--start (point) "missing regex delimiter")
           (throw 'regexp nil)))))
-    (jove-finish-token jove-REGEXP)
-    (jove-set-face jove--start jove--end 'font-lock-string-face)
-    (dolist (f fontifies)
-      (apply #'jove-set-face f))))
+    (jove-finish-token jove-REGEXP jove--face)  ; Kludge
+    (setq jove--face (cons `(,jove--start ,jove--end font-lock-string-face) jove--face))))
 
 (defun jove-read-regexp ()
   "Read a regular expression."
@@ -1072,8 +1050,7 @@ eol or eof is reached before the matching delimiter."
        (t
         (setq looking nil)
         (jove-warn jove--start (point) "Missing string closing delimiter")))))
-  (jove-finish-token jove-STRING)
-  (jove-set-face jove--start jove--end font-lock-string-face))
+  (jove-finish-token jove-STRING 'font-lock-string-face))
 
 (defun jove-read-tmpl-token ()
   "Read a template string."
@@ -1088,11 +1065,9 @@ eol or eof is reached before the matching delimiter."
                    (eq jove-TEMPLATE jove--tt))
               (progn
                 (forward-char)
-                (jove-finish-token jove-BACKQUOTE)
-                (jove-set-face jove--start jove--end font-lock-string-face)
+                (jove-finish-token jove-BACKQUOTE 'font-lock-string-face)
                 (throw 'token nil))
-            (jove-finish-token jove-TEMPLATE)
-            (jove-set-face jove--start jove--end font-lock-string-face)
+            (jove-finish-token jove-TEMPLATE 'font-lock-string-face)
             (throw 'token nil)))
          ((eq ?\$ char)
           (if (eq ?\{ (jove-peek-char))
@@ -1102,8 +1077,7 @@ eol or eof is reached before the matching delimiter."
                     (forward-char 2)
                     (jove-finish-token jove-DOLLAR-BRACE-L)
                     (throw 'token nil))
-                (jove-finish-token jove-TEMPLATE)
-                (jove-set-face jove--start jove--end font-lock-string-face)
+                (jove-finish-token jove-TEMPLATE 'font-lock-string-face)
                 (throw 'token nil))
             ;; Its possible to catch a single '$' which is part of the
             ;; literal template string. So it is necessary to always
@@ -1181,13 +1155,13 @@ eol or eof is reached before the matching delimiter."
       (setq tt (or (and (not jove--contains-esc)
                         (gethash word jove-keywords))
                    jove-NAME)))
-    (jove-finish-token tt word)
-    (cond
-     ((or (jove-tt-is-atom jove--tt)
-          (memq jove--tt (list jove-THIS jove-SUPER)))
-      (jove-set-face jove--start jove--end 'font-lock-builtin-face))
-     ((jove-tt-is-keyword jove--tt)
-      (jove-set-face jove--start jove--end 'font-lock-keyword-face)))))
+    (jove-finish-token tt
+                   (or (and (or (jove-tt-is-atom tt)
+                                (memq tt (list jove-THIS jove-SUPER)))
+                            'font-lock-builtin-face)
+                       (and (jove-tt-is-keyword tt)
+                            'font-lock-keyword-face))
+                   word)))
 
 (defun jove-jsx-read-token ()
   (let (char
@@ -1238,17 +1212,16 @@ eol or eof is reached before the matching delimiter."
         (setq looking nil)
         (jove-warn jove--start (point) "Missing string closing delimiter"))))
     ;; Finish as a regular string token type.
-    (jove-finish-token jove-STRING)
-    (jove-set-face jove--start jove--end 'font-lock-string-face)))
+    (jove-finish-token jove-STRING 'font-lock-string-face)))
 
 (defun jove-jsx-read-word ()
   ;; First character will have already be checked for an
   ;; identifier start character.
-  (let ((start (point)))
-    (while (or (< 0 (skip-syntax-forward "w_"))
-               (and (eq ?- (char-after))
-                    (progn (forward-char) t))))
-    (jove-finish-token jove-JSX-NAME (buffer-substring-no-properties start (point)))))
+  (while (or (< 0 (skip-syntax-forward "w_"))
+             (and (eq ?- (char-after))
+                  (progn (forward-char) t))))
+  (jove-finish-token jove-JSX-NAME)
+  (setq jove--value (buffer-substring-no-properties jove--start jove--end)))
 
 (defun jove-read-token (char)
   "Read token using provided first CHAR."
@@ -1266,7 +1239,7 @@ eol or eof is reached before the matching delimiter."
    ((eq ?: char) (jove-finish-punc jove-COLON))
    ((eq ?\` char)
     (jove-finish-punc jove-BACKQUOTE)
-    (jove-set-face jove--start jove--end font-lock-string-face))
+    (setq jove--face 'font-lock-string-face))
    ((eq ?0 char)
     (let ((next (jove-peek-char 1)))
       (cond
@@ -1311,7 +1284,6 @@ eol or eof is reached before the matching delimiter."
     ;; Initialize current token state.
     (setq jove--start (point)
           jove--value nil
-          jove--face nil
           char (char-after))
     (cond
      ((eobp)

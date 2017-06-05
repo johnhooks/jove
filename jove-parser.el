@@ -48,6 +48,41 @@ recorded.")
 (defvar-local jove--peeked nil
   "Previously peeked token.")
 
+;; Fontification
+
+(defsubst jove-clear-face (start end)
+  "Remove face properties from START to END."
+  (remove-text-properties start end '(font-lock-face nil)))
+
+(defun jove-apply-fontifications (start end &optional no-clear)
+  "Apply fontifications from START to END.
+Boolean NO-CLEAR flag prevents clearing faces before application."
+  (with-silent-modifications
+    (unless no-clear (jove-clear-face start end))
+    (mapc #'(lambda (f)
+              (apply #'put-text-property f))
+          (nreverse jove--fontifications))  ; Allows applying over those previously pushed.
+    (mapc #'(lambda (f)
+              (put-text-property (nth 0 f) (nth 1 f) 'font-lock-face font-lock-warning-face))
+          jove--warnings)
+    (setq jove--fontifications nil
+          jove--warnings nil)))     ; Probably shouldn't reset here.
+
+(defun jove-set-face (start end face)
+  "Queue region START to END for fontification using FACE."
+  (when jove-fontify                        ; Kluge.  Should move fontification out of lexer.
+    (setq start (min (point-max) start)
+          start (max (point-min) start)
+          end (min (point-max) end)
+          end (max (point-min) end))
+    (push (list start end 'font-lock-face face) jove--fontifications)))
+
+(defsubst jove-set-face* (object face)
+  "Queue region from OBJECT for fontification using FACE.
+Both nodes and tokens use zero index for the start position and
+the first index for the end position."
+  (jove-set-face (nth 0 object) (nth 1 object) face))
+
 ;;; Initialization
 
 (defun jove-config (&optional _state)
@@ -70,7 +105,12 @@ If STATE not supplied create an initial state."
         jove--prev-tt jove--tt
         jove--prev-value jove--value
         jove--prev-linum jove--linum)
-  (jove-next-token))
+  (jove-next-token)
+  (when jove--face
+    (if (listp jove--face)
+        (dolist (f jove--face)
+          (apply #'jove-set-face f))
+      (jove-set-face jove--start jove--end jove--face))))
 
 ;; TODO: This function should not waste the tokens, they should be collected.
 (defun jove-peek (&optional count)
