@@ -167,6 +167,11 @@ it to be reparsed when the buffer is selected."
         (not jove-fontify-regexp-grouping-chars))
   (jove--reparse t))
 
+;;; Misc
+
+(defun jove-fontify-comment ()
+  (jove-set-face jove--comment-start jove--comment-end 'font-lock-comment-face))
+
 ;;; Before and After Change Hook Functions
 
 (defun jove--flush-caches (&optional start _ignore)
@@ -198,6 +203,8 @@ Buffer edit spans from BEG to END and is of length LEN."
   ;; Change hooks
   (add-hook 'before-change-functions #'jove--flush-caches t t)
   (add-hook 'after-change-functions #'jove--edit nil t)
+
+  (add-hook 'jove-after-comment-hook #'jove-fontify-comment)
 
   (setq-local syntax-propertize-function #'js-syntax-propertize)
 
