@@ -70,12 +70,11 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
 
 (defun jove-set-face (start end face)
   "Queue region START to END for fontification using FACE."
-  (when jove-fontify                        ; Kluge.  Should move fontification out of lexer.
-    (setq start (min (point-max) start)
-          start (max (point-min) start)
-          end (min (point-max) end)
-          end (max (point-min) end))
-    (push (list start end 'font-lock-face face) jove--fontifications)))
+  (setq start (min (point-max) start)
+        start (max (point-min) start)
+        end (min (point-max) end)
+        end (max (point-min) end))
+  (push (list start end 'font-lock-face face) jove--fontifications))
 
 (defsubst jove-set-face* (object face)
   "Queue region from OBJECT for fontification using FACE.

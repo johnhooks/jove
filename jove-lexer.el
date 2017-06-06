@@ -61,9 +61,6 @@ A scratch variable.")
 (defvar-local jove--cache '()
   "List of previously lexed tokens.")
 
-(defvar-local jove--face nil
-  "A suggested face for the current token.")
-
 ;;; Regular Expressions
 
 (defconst jove-binary-re "[0-1]+"
@@ -400,6 +397,9 @@ Used by `jove-read-word' to store the parsed string value.")
 (defvar-local jove--linum nil
   "Current line number.")
 
+(defvar-local jove--face nil
+  "Current token's suggested face.")
+
 (defvar-local jove--expr-allowed t
   "Boolean to indicate whether an expression is allowed.")
 
@@ -443,14 +443,15 @@ Additional information beyond type.")
 
 (defun jove-copy-lexer-state ()
   "Return a list representing a copy of the lexer state."
-  (list jove--start
-        jove--end
-        jove--tt
-        jove--value
-        jove--linum
-        jove--expr-allowed
-        jove--newline-before
-        jove--ctx-stack))
+  (list jove--start                         ; 0
+        jove--end                           ; 1
+        jove--tt                            ; 2
+        jove--value                         ; 3
+        jove--face                          ; 4
+        jove--linum                         ; 5
+        jove--expr-allowed                  ; 6
+        jove--newline-before                ; 7
+        jove--ctx-stack))                   ; 8
 
 ;;; Utility Functions
 
@@ -1332,14 +1333,17 @@ eol or eof is reached before the matching delimiter."
             jove--end (nth 1 state)
             jove--tt (nth 2 state)
             jove--value (nth 3 state)
-            jove--linum (nth 4 state)
-            jove--expr-allowed (nth 5 state)
-            jove--newline-before (nth 6 state)
-            jove--ctx-stack (nth 7 state))
+            jove--face (nth 4 state)
+            jove--linum (nth 5 state)
+            jove--expr-allowed (nth 6 state)
+            jove--newline-before (nth 7 state)
+            jove--ctx-stack (nth 8 state))
     ;; Create an initial lexer state.
     (setq jove--start 1
           jove--end 1
           jove--tt jove-BOB
+          jove--value nil
+          jove--face nil
           jove--linum 1
           jove--expr-allowed t
           jove--newline-before nil
@@ -1394,8 +1398,7 @@ eol or eof is reached before the matching delimiter."
 (defun jove-lex-to (&optional position)
   "Tokenize buffer contents as JavaScript."
   ;; NOTE: This function is just for testing the speed of the lexer.
-  (let ((start-time (float-time))
-        (jove-fontify nil))
+  (let ((start-time (float-time)))
     (jove-flush-lexer-cache position)
     (save-restriction
       (widen)
