@@ -1358,7 +1358,7 @@ eol or eof is reached before the matching delimiter."
     (setq jove--cache (cdr jove--cache)))
   (setq jove--cache-end (if jove--cache
                         (car (cdr (car jove--cache)))
-                      0)))
+                      1)))
 
 ;; Need to really think though the process of caching the tokens
 ;; and how to resume once the cache is used up.

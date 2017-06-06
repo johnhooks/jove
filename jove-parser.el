@@ -42,6 +42,9 @@
 The starting position of identifiers and parenthesized expressions are
 recorded.")
 
+(defvar-local jove--tmp nil
+  "Temporary stack of previously lexed tokens.")
+
 (defvar-local jove--error nil
   "Current parse error.")
 
@@ -70,10 +73,12 @@ Boolean NO-CLEAR flag prevents clearing faces before application."
 
 (defun jove-set-face (start end face)
   "Queue region START to END for fontification using FACE."
-  (setq start (min (point-max) start)
-        start (max (point-min) start)
-        end (min (point-max) end)
-        end (max (point-min) end))
+  ;; This could was in js2-mode... don't understand its purpose.
+  ;; Other than if someone put in a bad value.
+  ;; (setq start (min (point-max) start)
+  ;;       start (max (point-min) start)
+  ;;       end (min (point-max) end)
+  ;;       end (max (point-min) end))
   (push (list start end 'font-lock-face face) jove--fontifications))
 
 (defsubst jove-set-face* (object face)
@@ -87,16 +92,21 @@ the first index for the end position."
 (defun jove-config (&optional _state)
   "Initialize the parser.
 If STATE not supplied create an initial state."
+  (while (eq jove-EOB (jove-tt (car jove--cache)))  ; Kludge
+    (pop jove--cache))
   (setq jove--in-function nil
         jove--in-async nil
         jove--in-generator nil
         jove--in-declaration nil
-        jove--potential-arrow-at -1)
+        jove--potential-arrow-at -1
+        jove--tmp (nreverse jove--cache)
+        jove--cache nil)
+  (message "tmp %d" (length jove--tmp))
   (jove-config-lexer))
 
 ;;; Token Movement Functions
 
-(defsubst jove-next ()
+(defun jove-next ()
   "Advance parser to next token."
   ;; This is just a temp measure until I figure out a better way.
   (setq jove--prev-start jove--start
@@ -104,7 +114,11 @@ If STATE not supplied create an initial state."
         jove--prev-tt jove--tt
         jove--prev-value jove--value
         jove--prev-linum jove--linum)
-  (jove-next-token)
+  (if jove--tmp
+      (jove-config-lexer (pop jove--tmp))
+    (jove-next-token))
+  (push (jove-copy-lexer-state) jove--cache)
+  (setq jove--cache-end jove--end)              ; ! Important
   (when jove--face
     (if (listp jove--face)
         (dolist (f jove--face)
@@ -1145,12 +1159,12 @@ operand.  The boolean HIGHLIGHT flags to set variable name face."
   "Parse a program.
 Add top level statements as children to NODE."
   (condition-case err
-      (while (jove-is-not jove-EOB)
-        (jove-add-child node (jove-parse-statement t)))
+      (progn
+        (while (not (eq jove-EOB jove--tt))
+          (jove-add-child node (jove-parse-statement t)))
+        (setq jove-ast-complete-p t))
     (jove-parse-error
      (when jove-debug (message "%s" (cadr err)))))
-  (jove-next)                             ; Move over EOF.
-
   (jove-finish node 'program))
 
 (defun jove-parse-statement (&optional declaration)
@@ -1876,8 +1890,8 @@ and closing tag."
     (save-excursion
       (jove-config)
       (setq jove-ast (jove-make-node))
-      (let ((start-pos (point))
-            (start-time (float-time)))
+      (let ((start-time (float-time))
+            (cache-end jove--cache-end))
         (jove-next)                         ; Load an initial token.
         (save-match-data
           ;; FIX: Does setq need to be used, `jove-ast' should be mutated in
@@ -1888,7 +1902,7 @@ and closing tag."
                                       10000))
                          10000.0)))
             (message "Parser finished in %0.3fsec" time)))
-        (jove-apply-fontifications start-pos (point))))))
+        (jove-apply-fontifications cache-end (point))))))
 
 (defun jove-find-node-at (node pos)
   "Return NODE or a child of NODE at found at POS.

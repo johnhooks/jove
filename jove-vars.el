@@ -94,12 +94,14 @@
 
 ;;; Buffer Local Variables
 
-(defvar-local jove-mode-reparse-on-edit t
-  "Boolean to flag automactic reparse on edit.
-Typical use is while debugging Jove Mode itself.")
-
 (defvar-local jove-ast nil
   "Parsed abstract syntax tree.")
+
+(defvar-local jove-ast-complete-p nil
+  "Boolean to flag the abstract syntax tree is complete.")
+
+(defvar-local jove-disable-parser-p nil
+  "Boolean to flag to disable parser.")
 
 (defvar-local jove--state nil
   "The current parser state.
@@ -109,11 +111,7 @@ Private variable.")
   "Boolean to flag the buffer requires reparsing.
 Private variable.")
 
-(defvar-local jove--ast-complete-p nil
-  "Boolean to flag the abstract syntax tree is complete.
-Private variable.")
-
-(defvar-local jove--cache-end 0
+(defvar-local jove--cache-end 1
   "Number representing the position of the last buffer modification.
 Private variable.")
 

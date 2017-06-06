@@ -147,7 +147,7 @@ it to be reparsed when the buffer is selected."
   (interactive)
   (when jove--idle-timer
     (cancel-timer jove--idle-timer))
-  (setq jove-mode-reparse-on-edit nil))
+  (setq jove-disable-parser-p nil))
 
 (defun jove-toggle-verbose ()
   "Toggle verbose parser messages."
@@ -177,13 +177,15 @@ it to be reparsed when the buffer is selected."
 (defun jove--flush-caches (&optional start _ignore)
   ;; Don't know what the IGNORE argument is for.
   (setq start (or start (save-restriction (widen) (point-min))))
-  (setq jove--cache-end (min jove--cache-end start)))
+  (setq jove--cache-end (min jove--cache-end start))
+  (jove-flush-lexer-cache jove--cache-end))
 
 (defun jove--edit (_beg _end _len)
   "Schedule a new parse after buffer is edited.
 Buffer edit spans from BEG to END and is of length LEN."
-  (setq jove--buffer-dirty-p t)
-  (when jove-mode-reparse-on-edit
+  (setq jove-ast-complete-p nil
+        jove--buffer-dirty-p t)
+  (unless jove-disable-parser-p
     (jove--reset-timer)))
 
 ;;; The Mode
@@ -208,13 +210,16 @@ Buffer edit spans from BEG to END and is of length LEN."
 
   (setq-local syntax-propertize-function #'js-syntax-propertize)
 
+  ;; TODO: replace `forward-sexp-function'
+
   (setq-local electric-indent-chars
                ;FIXME: js2-mode adds "[]*".
               (append "{}():;," electric-indent-chars))
   (setq-local electric-layout-rules
               '((?\; . after) (?\{ . after) (?\} . before)))
 
-  (jove--reparse t))
+  (unless jove-disable-parser-p
+    (jove--reparse t)))
 
 (provide 'jove-mode)
 
