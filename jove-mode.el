@@ -170,15 +170,18 @@ it to be reparsed when the buffer is selected."
 ;;; Misc
 
 (defun jove-fontify-comment ()
-  (jove-set-face jove--comment-start jove--comment-end 'font-lock-comment-face))
+  (jove-set-face jove--start jove--end 'font-lock-comment-face))
 
 ;;; Before and After Change Hook Functions
 
 (defun jove--flush-caches (&optional start _ignore)
   ;; Don't know what the IGNORE argument is for.
   (setq start (or start (save-restriction (widen) (point-min))))
-  (setq jove--cache-end (min jove--cache-end start))
-  (jove-flush-lexer-cache jove--cache-end))
+  (jove-flush-lexer-cache (min (save-excursion
+                             ;; Kledge to prevent partial lexed token
+                             (goto-char jove--cache-end)
+                             (point-at-bol))
+                           start)))
 
 (defun jove--edit (_beg _end _len)
   "Schedule a new parse after buffer is edited.

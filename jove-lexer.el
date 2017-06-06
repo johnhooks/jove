@@ -19,6 +19,8 @@
 
 ;;; Commentary:
 
+;; TODO: Remove all fontification.
+
 ;;; Code:
 
 (require 'jove-vars)
@@ -39,14 +41,6 @@
 
 ;; Buffer Local Global Scratch Variables
 
-(defvar-local jove--comment-start -1
-  "The start position of the comment.
-A scratch variable.")
-
-(defvar-local jove--comment-end -1
-  "The end position of the comment.
-A scratch variable.")
-
 (defvar-local jove--string-buffer nil
   "List of string chunks built up while scanning various tokens.
 A scratch variable.")
@@ -54,9 +48,6 @@ A scratch variable.")
 (defvar-local jove--contains-esc nil
   "Boolean flag to indicate to `jove-read-word' that it contains an escape.
 A scratch variable.")
-
-(defvar-local jove--token-cache '()
-  "List of previously lexed tokens.")
 
 (defvar-local jove--cache '()
   "List of previously lexed tokens.")
@@ -226,6 +217,7 @@ pairs collected in OPTIONS."
 (defconst jove-ELLIPSIS (jove-make-tt "..." :before-expr t))
 (defconst jove-DOLLAR-BRACE-L (jove-make-tt "${" :before-expr t :starts-expr t))
 (defconst jove-BACKQUOTE (jove-make-tt "`" :before-expr t))
+(defconst jove-KLAMMERRAFFE (jove-make-tt "@" :before-expr t :prefix)) ; Clinging Monkey
 
 ;;; Operator Token Types
 
@@ -519,30 +511,25 @@ Otherwise signal `jove-unexpected-character-error'."
 (defun jove-skip-line-comment ()
   "Skip line comment.
 Run comment hook after the end is found."
-  (setq jove--comment-start (point))
-  (if (search-forward "\n" nil t)
+  (if (setq jove--end (search-forward "\n" nil t))
       (jove-inc-linum)
-    (goto-char (point-max)))          ; Reached the end of the buffer.
-  (setq jove--comment-end (point))
+    (setq jove--end (goto-char (point-max))))       ; Reached the end of the buffer.
   (run-hooks 'jove-after-comment-hook))
 
 (defun jove-skip-block-comment ()
   "Skip block comment.
 Run comment hook after the end is found."
-  (let ((start (point))
-        (looping t))
+  (let ((looping t))
     (condition-case nil
         (while looping
-          (re-search-forward "\*/\\|\C-j" nil)
+          (setq jove--end (re-search-forward "\*/\\|\C-j" nil))
           (if (eq ?\C-j (char-before))
               (jove-inc-linum)
             (if (and (eq ?\/ (char-before))
                      (eq ?* (char-before (1- (point)))))
                 (setq looping nil))))
       (search-failed
-       (jove-warn start (point) "Missing comment closing delimiter")))
-    (setq jove--comment-start start
-          jove--comment-end (point))
+       (jove-warn jove--start (point-max) "Missing comment closing delimiter")))
     (run-hooks 'jove-after-comment-hook)))
 
 (defun jove-skip-space ()
@@ -551,14 +538,17 @@ When a newline is encountered, `jove--newline-before' is set to t and
 `jove--linum' is incremented."
   (let ((first nil)
         (second nil)
-        (prev-linum jove--linum))
+        (prev-linum jove--linum)
+        (jove--start jove--start)               ; Lexically scoped copy.
+        (jove--end jove--end))                  ; Lexically scoped copy.
     (catch 'whitespace
       (while t
         (skip-syntax-forward " ")
         (setq first (char-after))
         (cond
          ((eq ?\/ first)
-          (if (eq ?\/ (setq second (jove-peek-char)))
+          (if (eq ?\/ (setq jove--start (point)
+                            second (jove-peek-char)))
               (jove-skip-line-comment)
             (if (eq ?\* second)
                 (jove-skip-block-comment)
@@ -1030,19 +1020,20 @@ otherwise nil."
 Search for ending delimiter matching PUNC.  Signal error if the
 eol or eof is reached before the matching delimiter."
   (forward-char)                        ; Move over opening delimiter.
-  (let (char
+  (let (pos
+        char
         (regexp (if (eq ?\' punc)
                     jove-string-single-quote-re
                   jove-string-double-quote-re))
         (looking t))
     (while looking
       ;; Advance to next critical character.
-      (re-search-forward regexp nil t)
+      (setq pos (re-search-forward regexp nil t))
       (setq char (char-after))
       (cond
        ;; Found an escape.
        ((eq ?\\ char)
-        (goto-char (+ (point) 2)))
+        (goto-char (+ pos 2)))
        ;; Found closing delimiter, exit the loop.
        ((eq punc char)
         (forward-char)
@@ -1055,15 +1046,16 @@ eol or eof is reached before the matching delimiter."
 
 (defun jove-read-tmpl-token ()
   "Read a template string."
-  (let (char)
+  (let (char
+        (pos jove--start))
     (catch 'token
       (while t
-        (re-search-forward "[^`$\\\\\C-j]*" nil t)
-        (setq char (char-after))
+        (setq pos (re-search-forward "[^`$\\\\\C-j]*" nil t)
+              char (char-after))
         (cond
          ((eq ?\` char)
-          (if (and (= jove--start (point))
-                   (eq jove-TEMPLATE jove--tt))
+          (if (and (= jove--start pos)      ; Switch from using `point'
+                   (eq jove-TEMPLATE jove--tt)) ; getting it for free from `re-search-forward'
               (progn
                 (forward-char)
                 (jove-finish-token jove-BACKQUOTE 'font-lock-string-face)
@@ -1206,7 +1198,6 @@ eol or eof is reached before the matching delimiter."
         (forward-char)
         (setq looking nil))
        ((eq ?\C-j char)
-        ;; Increment line number.
         (jove-inc-linum)
         (forward-char))
        (t                               ; Hit eob.
@@ -1333,22 +1324,19 @@ eol or eof is reached before the matching delimiter."
             jove--end (nth 1 state)
             jove--tt (nth 2 state)
             jove--value (nth 3 state)
-            jove--face (nth 4 state)
-            jove--linum (nth 5 state)
-            jove--expr-allowed (nth 6 state)
-            jove--newline-before (nth 7 state)
-            jove--ctx-stack (nth 8 state))
+            jove--linum (nth 4 state)
+            jove--expr-allowed (nth 5 state)
+            jove--newline-before (nth 6 state)
+            jove--ctx-stack (nth 7 state))
     ;; Create an initial lexer state.
     (setq jove--start 1
           jove--end 1
           jove--tt jove-BOB
           jove--value nil
-          jove--face nil
           jove--linum 1
           jove--expr-allowed t
           jove--newline-before nil
-          jove--ctx-stack (jove-initial-ctx)
-          jove--token-cache '()))
+          jove--ctx-stack (jove-initial-ctx)))
   (goto-char jove--end))
 
 (defun jove-flush-lexer-cache (position)

@@ -92,16 +92,16 @@ the first index for the end position."
 (defun jove-config (&optional _state)
   "Initialize the parser.
 If STATE not supplied create an initial state."
-  (while (eq jove-EOB (jove-tt (car jove--cache)))  ; Kludge
-    (pop jove--cache))
+  ;; (while (eq jove-EOB (jove-tt (car jove--cache)))  ; Kludge
+  ;;   (pop jove--cache))
   (setq jove--in-function nil
         jove--in-async nil
         jove--in-generator nil
         jove--in-declaration nil
         jove--potential-arrow-at -1
-        jove--tmp (nreverse jove--cache)
-        jove--cache nil)
-  (message "tmp %d" (length jove--tmp))
+        ;; jove--tmp (nreverse jove--cache)
+        ;; jove--cache nil
+        )
   (jove-config-lexer))
 
 ;;; Token Movement Functions
@@ -114,11 +114,12 @@ If STATE not supplied create an initial state."
         jove--prev-tt jove--tt
         jove--prev-value jove--value
         jove--prev-linum jove--linum)
-  (if jove--tmp
-      (jove-config-lexer (pop jove--tmp))
-    (jove-next-token))
-  (push (jove-copy-lexer-state) jove--cache)
-  (setq jove--cache-end jove--end)              ; ! Important
+  ;; (if jove--tmp
+  ;;     (jove-config-lexer (pop jove--tmp))
+  ;;   (jove-next-token))
+  ;; (push (jove-copy-lexer-state) jove--cache)
+  ;; (setq jove--cache-end jove--end)              ; ! Important
+  (jove-next-token)
   (when jove--face
     (if (listp jove--face)
         (dolist (f jove--face)
@@ -134,13 +135,17 @@ Return a copy of the updated LEX-STATE."
           (jove--end jove--end)
           (jove--tt jove--tt)
           (jove--value jove--value)
+          (jove--face jove--face)
           (jove--linum jove--linum)
           (jove--expr-allowed jove--expr-allowed)
           (jove--newline-before jove--newline-before)
-          (jove--ctx-stack jove--ctx-stack))
+          (jove--ctx-stack jove--ctx-stack)
+          (tmp jove--tmp))
       (if (numberp count)
           (progn
             (while (< 0 (setq count (1- count)))
+              (if tmp
+                  (jove-config-lexer (pop tmp)))
               (jove-next-token))
             (jove-next-token))
         (jove-next-token))
@@ -801,8 +806,6 @@ are allowed."
 (defun jove-parse-template-element ()
   "Parse template element."
   (let ((node (jove-make-node)))
-    ;; FIXME: If the template is empty it will skip over the closing
-    ;; quasi.
     (jove-next)
     (when (eq jove-BACKQUOTE jove--tt)
       (jove-set-prop node :tail t))
@@ -810,16 +813,20 @@ are allowed."
 
 (defun jove-parse-template ()
   "Parse template literal."
-  (let ((elt nil)
+  ;; TODO: Fontify template literals from here.
+  (let ((elt nil)                       ; Maintain ref to current element.
         (node (jove-make-node)))
     (jove-next)                             ; Move over '`'
     (jove-add-child node (setq elt (jove-parse-template-element)))
     (while (not (jove-get-prop elt :tail))
       (jove-expect jove-DOLLAR-BRACE-L)
       (if (eq jove-BRACE-R jove--tt)
-          (progn
-            (jove-add-child node (jove-make-node jove--prev-end jove--prev-start 'null-expression))
-            (jove-next))
+          ;; Expression is empty.
+          (jove-add-child node (prog1 (jove-make-node jove--prev-end
+                                              jove--start
+                                              'null-expression)
+                             (jove-next)))
+        ;; Otherwise parse an expression.
         (jove-add-child node (jove-parse-expression))
         (jove-expect jove-BRACE-R))
       (jove-add-child node (setq elt (jove-parse-template-element))))
@@ -1890,8 +1897,10 @@ and closing tag."
     (save-excursion
       (jove-config)
       (setq jove-ast (jove-make-node))
-      (let ((start-time (float-time))
-            (cache-end jove--cache-end))
+      (let ((start-pos (point))
+            (start-time (float-time))
+            ;; (cache-end jove--cache-end)
+            )
         (jove-next)                         ; Load an initial token.
         (save-match-data
           ;; FIX: Does setq need to be used, `jove-ast' should be mutated in
@@ -1902,7 +1911,7 @@ and closing tag."
                                       10000))
                          10000.0)))
             (message "Parser finished in %0.3fsec" time)))
-        (jove-apply-fontifications cache-end (point))))))
+        (jove-apply-fontifications start-pos (point))))))
 
 (defun jove-find-node-at (node pos)
   "Return NODE or a child of NODE at found at POS.
