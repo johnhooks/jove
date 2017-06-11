@@ -112,13 +112,7 @@ If STATE not supplied create an initial state."
   (setq jove--prev-start jove--start
         jove--prev-end jove--end
         jove--prev-tt jove--tt
-        jove--prev-value jove--value
         jove--prev-linum jove--linum)
-  ;; (if jove--tmp
-  ;;     (jove-config-lexer (pop jove--tmp))
-  ;;   (jove-next-token))
-  ;; (push (jove-copy-lexer-state) jove--cache)
-  ;; (setq jove--cache-end jove--end)              ; ! Important
   (jove-next-token)
   (when jove--face
     (if (listp jove--face)

@@ -30,6 +30,7 @@
 ;;; Code:
 
 (require 'cc-mode)
+(require 'js)
 
 (require 'jove-identifier)
 (require 'jove-lexer)
@@ -147,7 +148,7 @@ it to be reparsed when the buffer is selected."
   (interactive)
   (when jove--idle-timer
     (cancel-timer jove--idle-timer))
-  (setq jove-disable-parser-p nil))
+  (setq jove-disable-parser-p t))
 
 (defun jove-toggle-verbose ()
   "Toggle verbose parser messages."
@@ -178,7 +179,7 @@ it to be reparsed when the buffer is selected."
   ;; Don't know what the IGNORE argument is for.
   (setq start (or start (save-restriction (widen) (point-min))))
   (jove-flush-lexer-cache (min (save-excursion
-                             ;; Kledge to prevent partial lexed token
+                             ;; Kledge to prevent a partially lexed token
                              (goto-char jove--cache-end)
                              (point-at-bol))
                            start)))

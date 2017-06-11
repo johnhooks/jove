@@ -30,9 +30,6 @@
 (defvar jove-keywords (make-hash-table :test 'equal)
   "Hash table to map keyword names to token types.")
 
-(defvar jove-before-read-token-fn nil
-  "Function called after skipping space and but before reading.")
-
 (defvar jove-after-ctx-update-fn nil
   "Function called after the context stack has been updated.")
 
@@ -1247,7 +1244,7 @@ eol or eof is reached before the matching delimiter."
    ((<= ?1 char ?9)
     (jove-eat-re jove-number-re)
     (jove-finish-token jove-NUM))
-   ((or (eq ?\' char) (eq ?\" char)) (jove-read-string char))
+   ((memq char '(?\' ?\")) (jove-read-string char))
    ((eq ?\/ char) (jove-read-token-slash))
    ((memq char '(?* ?%)) (jove-read-token-mult-modulo-exp char))
    ((memq char '(?\| ?\&)) (jove-read-token-pipe-amp char))
@@ -1269,9 +1266,6 @@ eol or eof is reached before the matching delimiter."
     (when (or (not ctx)
               (not (jove-ctx-preserve-space ctx)))
       (jove-skip-space))
-
-    (when (functionp jove-before-read-token-fn)
-      (funcall jove-before-read-token-fn))
 
     ;; Initialize current token state.
     (setq jove--start (point)
@@ -1426,7 +1420,8 @@ parenthesis.  Tokens are cache while searching."
          ((eq jove-PAREN-L jove--tt)
           (push t stack)))
         (not (or (eq jove-PAREN-R jove--tt)
-                      (eq jove-EOB jove--tt)))))))
+                 (eq jove-EOB jove--tt)))))))
+
 (provide 'jove-lexer)
 
 ;;; jove-lexer.el ends here
