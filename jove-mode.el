@@ -178,11 +178,7 @@ it to be reparsed when the buffer is selected."
 (defun jove--flush-caches (&optional start _ignore)
   ;; Don't know what the IGNORE argument is for.
   (setq start (or start (save-restriction (widen) (point-min))))
-  (jove-flush-lexer-cache (min (save-excursion
-                             ;; Kledge to prevent a partially lexed token
-                             (goto-char jove--cache-end)
-                             (point-at-bol))
-                           start)))
+  (jove-flush-ast (min start jove--cache-end)))
 
 (defun jove--edit (_beg _end _len)
   "Schedule a new parse after buffer is edited.

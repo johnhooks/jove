@@ -92,28 +92,36 @@ the first index for the end position."
 (defun jove-config (&optional _state)
   "Initialize the parser.
 If STATE not supplied create an initial state."
-  ;; (while (eq jove-EOB (jove-tt (car jove--cache)))  ; Kludge
-  ;;   (pop jove--cache))
   (setq jove--in-function nil
         jove--in-async nil
         jove--in-generator nil
         jove--in-declaration nil
-        jove--potential-arrow-at -1
-        ;; jove--tmp (nreverse jove--cache)
-        ;; jove--cache nil
-        )
-  (jove-config-lexer))
+        jove--potential-arrow-at -1)
+
+  (while (eq jove-EOB (jove-tt (car jove--cache)))  ; Kludge
+    (pop jove--cache))
+
+  ;; TODO: Need to figure out a way to make sure the two matchup.
+  ;; (eq (jove-end jove-ast)                   ; If the end points do not match
+  ;;     (jove-end (car jove--cache)))         ; complete a full reparse.
+  
+  (if (and jove-ast
+           jove--cache)
+      (progn
+        (jove-config-lexer (car jove--cache))
+        (jove-next))
+    (jove-config-lexer)
+    (setq jove-ast (jove-make-node))
+    (jove-next)))                          ; Load initial token and cache.
 
 ;;; Token Movement Functions
 
 (defun jove-next ()
   "Advance parser to next token."
   ;; This is just a temp measure until I figure out a better way.
-  (setq jove--prev-start jove--start
-        jove--prev-end jove--end
-        jove--prev-tt jove--tt
-        jove--prev-linum jove--linum)
   (jove-next-token)
+  (push (jove-copy-lexer-state) jove--cache)
+  (setq jove--cache-end jove--end)              ; !Important
   (when jove--face
     (if (listp jove--face)
         (dolist (f jove--face)
@@ -1156,6 +1164,19 @@ operand.  The boolean HIGHLIGHT flags to set variable name face."
          (and (not (nth 4 next))        ; The 'newline-before' slot.
               (eq jove-FUNCTION (jove-tt next))))))
 
+;; It seems what would be most helpful would be to not have the top
+;; level actually be a node. It should be a stack in which top level
+;; statements are pushed and when a change happens flush to before the
+;; change.
+
+;; Or if it is a node, when there is a change, nreverse its children,
+;; pop off all that are after the change point. Set the cache-end and
+;; token cache to the same position. Then re-nreverse the program's children,
+;; and initiate a reparse from the end of the last complete statement.
+
+;; Pretty sure that if the child causes an error it should not be added to the
+;; ast
+
 (defun jove-parse-top-level (node)
   "Parse a program.
 Add top level statements as children to NODE."
@@ -1889,16 +1910,10 @@ and closing tag."
   (save-restriction
     (widen)
     (save-excursion
-      (jove-config)
-      (setq jove-ast (jove-make-node))
       (let ((start-pos (point))
-            (start-time (float-time))
-            ;; (cache-end jove--cache-end)
-            )
-        (jove-next)                         ; Load an initial token.
+            (start-time (float-time)))
+        (jove-config)
         (save-match-data
-          ;; FIX: Does setq need to be used, `jove-ast' should be mutated in
-          ;; place
           (setq jove-ast (jove-parse-top-level jove-ast)))
         (when jove-verbose
           (let ((time (/ (truncate (* (- (float-time) start-time)
@@ -1926,6 +1941,44 @@ Return nil if nothing is found."
       (jove-find-node-at child pos))
      (t
       (jove-find-child-at (cdr children) pos)))))
+
+;; Process
+;; Initial
+;; - Attempt to create full AST.
+;; - Add children in a way in which a partial ast is possible if there is an error.
+;; - Create a token cache while parsing.
+;; - make the process async'ish. pause every 1/30 of a second to wait for input.
+;;   If input flush to the last statement before that position.
+
+;; On a change
+;; - Flush both ast and token cache.
+;; - Set timer for reparse.
+
+;; On idle reparse
+;; - Read one token using the top state from the token cache.
+;;   The parser is always one token ahead.
+;; - Begin added statements to the ast.
+
+;; What needs to happen but is not is a comparison of the
+;; cache, the ast and the start of the change. Maybe after
+;; finding the 'end' if the lexer cache doesn't match up
+;; with the end of the ast node clear everything and start
+;; over.
+
+(defun jove-flush-ast (position)
+  "Flush top level statements from `jove-ast' to POSITION."
+  (let ((children (nreverse (jove-children jove-ast))))
+    (while (and children
+                (< position (jove-end (car children))))
+      (setq children (cdr children)))
+    (let ((end (jove-end (car children))))
+      (if end
+          (progn
+            (jove-set-end jove-ast end)
+            (jove-flush-lexer-cache end)
+            (setf (nth 5 jove-ast) children))
+        (setq jove-ast nil)
+        (jove-flush-lexer-cache)))))
 
 (provide 'jove-parser)
 

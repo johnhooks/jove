@@ -436,7 +436,6 @@ Additional information beyond type.")
         jove--end                           ; 1
         jove--tt                            ; 2
         jove--value                         ; 3
-        jove--face                          ; 4
         jove--linum                         ; 5
         jove--expr-allowed                  ; 6
         jove--newline-before                ; 7
@@ -678,13 +677,30 @@ modified to reflect the change of `jove--prev-tt'."
               (pop jove--ctx-stack)
               (setq jove--expr-allowed (eq jove-J-EXPR (jove-current-ctx))))
           (setq jove--expr-allowed t))))
+
+     ;; Quoted from acorn-jsx/inject.js
+     ;;   Do not consider JSX expr -> JSX open tag -> ... anymore
+
+     ;; NOTE: I do not get this. I will remove the `jove-J-EXPR' and
+     ;; when the context updates again on the `jove-J-CTAG' it will
+     ;; double pop the context stack, resulting in over removal.
+
+     ;; TODO: Consider removal. I don't think this condition is
+     ;; helpful for editing. For now consider '</>' a self closing
+     ;; tag.
+
+     ;; Now I get it! Its to reconsider the '<' as a closing tag
+     ;; rather than a opening tag. If it is followed by a '/'.
+
+     ;; Though if it runs across a '</>' it will double pop the
+     ;; context on accident.
+
      ((and (eq jove-SLASH tt)
            (eq jove-JSX-TAG-START prev-tt))
-      ;; NOTE: Quoted from acorn-jsx/inject.js
-      ;; Do not consider JSX expr -> JSX open tag -> ... anymore
       (setq jove--ctx-stack (cons jove-J-CTAG
                               (cdr (cdr jove--ctx-stack)))
             jove--expr-allowed nil))
+
      ;; Otherwiser `jove-expr-allowed' is set to token type slot 'before-expr'.
      (t
       (setq jove--expr-allowed (jove-tt-before-expr tt))))
@@ -1261,6 +1277,11 @@ eol or eof is reached before the matching delimiter."
 
 (defun jove-next-token ()
   "Read next token."
+  (setq jove--prev-start jove--start
+        jove--prev-end jove--end
+        jove--prev-tt jove--tt
+        jove--prev-linum jove--linum)
+
   (let ((char nil)
         (ctx (jove-current-ctx)))
     (when (or (not ctx)
@@ -1333,14 +1354,18 @@ eol or eof is reached before the matching delimiter."
           jove--ctx-stack (jove-initial-ctx)))
   (goto-char jove--end))
 
-(defun jove-flush-lexer-cache (position)
+(defun jove-flush-lexer-cache (&optional position)
   "Flush the token cache to a position before the last edit."
-  (while (and jove--cache
-              (< position (car (cdr (car jove--cache)))))
-    (setq jove--cache (cdr jove--cache)))
-  (setq jove--cache-end (if jove--cache
-                        (car (cdr (car jove--cache)))
-                      1)))
+  (if (numberp position)
+      (progn
+        (while (and jove--cache
+                    (< position (car (cdr (car jove--cache)))))
+          (setq jove--cache (cdr jove--cache)))
+        (setq jove--cache-end (if jove--cache
+                              (car (cdr (car jove--cache)))
+                            1)))
+    (setq jove--cache-end 1
+          jove--cache nil)))
 
 ;; Need to really think though the process of caching the tokens
 ;; and how to resume once the cache is used up.
@@ -1377,25 +1402,37 @@ eol or eof is reached before the matching delimiter."
             (message "Lexer finished in %0.3fsec, count %d" time (length jove--cache)))))
       (setq jove--cache-end (point)))))
 
+;; TODO: This function needs to not flush the cache.
+;; If the cache exists use it, but don't modify it. Maybe it should
+;; return a seperate stack of tokens than the cache, while also
+;; loading the desired token into the global variables.
+
 (defun jove-lex-to (&optional position)
   "Tokenize buffer contents as JavaScript."
   ;; NOTE: This function is just for testing the speed of the lexer.
-  (let ((start-time (float-time)))
+  ;; The strategy is to lex to the token where point is and leave that
+  ;; data in the global variables, the previous tokens are in the cache.
+  (let ((start-time (float-time))
+        (looking t))
+    ;; TODO: Don't flush cache if unnecessary. Need an easy way to use
+    ;; previously lexed tokens which are in the cache, and then resume
+    ;; lexing and caching once they are used up.
     (jove-flush-lexer-cache position)
     (save-restriction
       (widen)
       (save-excursion
-        (if (car jove--cache)
-            (jove-config-lexer (car jove--cache))
-          ;; Kludge to handle the need of the lexer to start after `jove-BOB'.
-          (jove-config-lexer)
-          (jove-next-token)
-          (push (jove-copy-lexer-state) jove--cache))
         (save-match-data
-          (while (and (not (eq jove-EOB jove--tt))
-                      (<= jove--end position))
-            (jove-next-token)
-            (push (jove-copy-lexer-state) jove--cache))
+          (if (car jove--cache)
+              (jove-config-lexer (car jove--cache))
+            ;; Kludge to handle the need of the lexer to start after `jove-BOB'.
+            (jove-config-lexer)
+            (jove-next-token))
+          (while looking
+            (if (or (eq jove-EOB jove--tt)
+                    (> jove--end position))
+                (setq looking nil)
+              (push (jove-copy-lexer-state) jove--cache) ; Push previous
+              (jove-next-token)))                    ; Advance
           (let ((time (/ (truncate (* (- (float-time) start-time)
                                       10000))
                          10000.0)))
