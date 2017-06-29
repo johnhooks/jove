@@ -96,6 +96,7 @@ it to be reparsed when the buffer is selected."
   (unwind-protect
       (when (or jove--buffer-dirty-p force)
         (setq jove--buffer-dirty-p nil
+              ;; TODO: Remove. `jove-apply-fontifications' handles this
               jove--fontifications nil
               jove--warnings nil)
         (jove-parse))
@@ -176,9 +177,18 @@ it to be reparsed when the buffer is selected."
 ;;; Before and After Change Hook Functions
 
 (defun jove--flush-caches (&optional start _ignore)
-  ;; Don't know what the IGNORE argument is for.
+  "Flush the abstract syntax tree."
+  ;; TODO: Handle situations where an addition to a
+  ;; expression may accidently be parsed as an incomplete
+  ;; statement.
+  ;; (setq start (or (and start
+  ;;                      (save-excursion
+  ;;                        (goto-char start)
+  ;;                        (point-at-bol)))
+  ;;                 (save-restriction (widen) (point-min))))
   (setq start (or start (save-restriction (widen) (point-min))))
-  (jove-flush-ast (min start jove--cache-end)))
+  ;; (jove-flush-ast (min start jove--cache-end))
+  (jove-flush-ast start))
 
 (defun jove--edit (_beg _end _len)
   "Schedule a new parse after buffer is edited.

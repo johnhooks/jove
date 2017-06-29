@@ -45,6 +45,9 @@ recorded.")
 (defvar-local jove--tmp nil
   "Temporary stack of previously lexed tokens.")
 
+(defvar-local jove--flushed-p nil
+  "AST has previously been flushed.")
+
 (defvar-local jove--error nil
   "Current parse error.")
 
@@ -98,9 +101,6 @@ If STATE not supplied create an initial state."
         jove--in-declaration nil
         jove--potential-arrow-at -1)
 
-  (while (eq jove-EOB (jove-tt (car jove--cache)))  ; Kludge
-    (pop jove--cache))
-
   ;; TODO: Need to figure out a way to make sure the two matchup.
   ;; (eq (jove-end jove-ast)                   ; If the end points do not match
   ;;     (jove-end (car jove--cache)))         ; complete a full reparse.
@@ -108,8 +108,16 @@ If STATE not supplied create an initial state."
   (if (and jove-ast
            jove--cache)
       (progn
-        (jove-config-lexer (car jove--cache))
-        (jove-next))
+        (jove-config-lexer jove--cache)
+        ;; (jove-next) ; This would mean that if we start from a cached
+        ;; position all the previous token information is unavailable.
+        ;; I reviewed the situations in which the previous token info
+        ;; is used an there does not seem to be a situation in which
+        ;; not having it avaiable at the initial token of a statement
+        ;; would cause a problem. Though look into it more closely.
+
+        ;; Also the face information is not being saved right now.
+        )
     (jove-config-lexer)
     (setq jove-ast (jove-make-node))
     (jove-next)))                          ; Load initial token and cache.
@@ -119,9 +127,11 @@ If STATE not supplied create an initial state."
 (defun jove-next ()
   "Advance parser to next token."
   ;; This is just a temp measure until I figure out a better way.
+  (setq jove--prev-start jove--start
+        jove--prev-end jove--end
+        jove--prev-tt jove--tt
+        jove--prev-linum jove--linum)
   (jove-next-token)
-  (push (jove-copy-lexer-state) jove--cache)
-  (setq jove--cache-end jove--end)              ; !Important
   (when jove--face
     (if (listp jove--face)
         (dolist (f jove--face)
@@ -1180,13 +1190,24 @@ operand.  The boolean HIGHLIGHT flags to set variable name face."
 (defun jove-parse-top-level (node)
   "Parse a program.
 Add top level statements as children to NODE."
-  (condition-case err
-      (progn
-        (while (not (eq jove-EOB jove--tt))
-          (jove-add-child node (jove-parse-statement t)))
-        (setq jove-ast-complete-p t))
-    (jove-parse-error
-     (when jove-debug (message "%s" (cadr err)))))
+  (let (token
+        child)
+    (condition-case err
+        (progn
+          (while (not (eq jove-EOB jove--tt))
+            (setq token (jove-copy-lexer-state)
+                  child (jove-parse-statement t))
+            ;; Want to have a timer to check how long
+            ;; we have been parsing. If longer than 1/60
+            ;; of a second stop and give allow for input.
+            ;; if so cancel idle reparse otherwise keep
+            ;; chunking. Apply fontifications along the way.
+            (jove-set-prop child :token token)
+            (jove-add-child node child))
+          (setq jove-ast-complete-p t
+                jove--flushed-p nil))
+      (jove-parse-error
+       (when jove-debug (message "%s" (cadr err))))))
   (jove-finish node 'program))
 
 (defun jove-parse-statement (&optional declaration)
@@ -1526,6 +1547,10 @@ The boolean flag IS-ASYNC is used to set the global `jove-in-async'."
                                                    jove-PAREN-R)
                               'parameters)))
 
+;; FIX: This needs to parse correctly.
+;; toggleForm = () => {
+;;     this.setState({ showNewCardForm: !this.state.showNewCardForm });
+;;   };
 (defun jove-parse-class (node &optional is-statement)
   "Return NODE as 'class' declaration or literal.
 IF boolean flag IS-STATEMENT is non-nil parse as declaration."
@@ -1546,6 +1571,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
         (key-value)
         (method nil)
         (method-name nil)
+        (method-body nil)
         (body (jove-make-node))
         (is-generator nil)
         (is-async nil)
@@ -1598,13 +1624,25 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
                  ;; Reparse method key.
                  (setq method-name (jove-parse-property-name method)))))
 
-        (unless (jove-get-prop method-name :computed)
-          (jove-set-face* method-name 'font-lock-function-name-face))
+        (setq method-body (if (jove-eat jove-EQ)
+                              (prog1 (jove-parse-expression)
+                                (jove-semicolon))
+                            (jove-parse-method is-generator is-async)))
+        
+        (jove-add-child method method-body)
+        
+        (jove-finish method)
 
-        (jove-add-child body (jove-finish (jove-add-child method
-                                              (jove-parse-method is-generator
-                                                             is-async))
-                                  'method-definition))))
+        (if (memq (jove-type method-body)
+                  '(function-expression arrow-function-expression))
+            (progn
+              (jove-set-type method 'method-definition)
+              (jove-set-face* method-name 'font-lock-function-name-face))
+          (jove-set-type method 'property)
+          (jove-set-face* method-name 'js2-object-property))
+
+        (jove-add-child body method)))
+    
     (jove-add-child node (jove-finish body 'class-body))
     (jove-finish node (if is-statement 'class-declaration 'class-expression))))
 
@@ -1691,7 +1729,7 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
         (setq spec (jove-make-node))
         (jove-next)                         ; Move over '*'
         (when (jove-eat jove-AS)
-          (jove-set-face jove--start jove--end 'font-lock-keyword-face)
+          (jove-set-face jove--prev-start jove--prev-end 'font-lock-keyword-face)
           (when (eq jove-NAME jove--tt)
             (jove-set-face jove--start jove--end 'font-lock-variable-name-face)
             (jove-add-child spec (jove-parse-identifier))))
@@ -1791,12 +1829,8 @@ IF boolean flag IS-STATEMENT is non-nil parse as declaration."
           (jove-unexpected)))
       (let ((name (jove-jsx-parse-namespaced-name)))
         (if (eq 'jsx-identifier (jove-type name))
-            (let ((value (jove-get-prop name :value))
-                  (case-fold-search nil))
-              ;; Fontify as regular attribute if starts with lowercase.
-              (if (string-match "^[a-z]" value)
-                  (jove-set-face* name 'font-lock-variable-name-face)
-                (jove-set-face* name 'font-lock-function-name-face)))
+            ;; Fontify all attributes the same
+            (jove-set-face* name 'font-lock-variable-name-face)
           (jove-fontify-jsx-tag-name name))
         (jove-add-children node
                        name
@@ -1890,7 +1924,7 @@ and closing tag."
               (jove-get-qualified-jsx-name (car (cdr (jove-children object)))))))))
 
 (defun jove-fontify-jsx-tag-name (object &optional chainp namespacep)
-  "Transform JSX element name to string."
+  "Fontify JSX element name to string."
   (let ((type (jove-type object)))
     (cond
      ((eq 'jsx-identifier type)
@@ -1910,9 +1944,9 @@ and closing tag."
   (save-restriction
     (widen)
     (save-excursion
+      (jove-config)
       (let ((start-pos (point))
             (start-time (float-time)))
-        (jove-config)
         (save-match-data
           (setq jove-ast (jove-parse-top-level jove-ast)))
         (when jove-verbose
@@ -1921,6 +1955,29 @@ and closing tag."
                          10000.0)))
             (message "Parser finished in %0.3fsec" time)))
         (jove-apply-fontifications start-pos (point))))))
+
+;; TODO: Need function to find first node that starts at a position,
+;; not to go as deep into the tree as possible.
+
+;; works... though don't know how much more useful it is.
+(defun jove-x-find-node-at (node pos)
+  "Return NODE or a child of NODE at found at POS.
+Return nil if nothing is found."
+  (when (and (<= (jove-start node) pos)
+             (> (jove-end node) pos))
+    (jove-x-find-child-at (jove-children node) pos)))
+
+(defun jove-x-find-child-at (children pos)
+  "Search for first child in CHILDREN to be within POS."
+  (let ((child (car children)))
+    (cond
+     ((null child)
+      nil)
+     ((and (<= (jove-start child) pos)
+           (> (jove-end child) pos))
+      (cons (jove-type child) (jove-x-find-node-at child pos)))
+     (t
+      (jove-x-find-child-at (cdr children) pos)))))
 
 (defun jove-find-node-at (node pos)
   "Return NODE or a child of NODE at found at POS.
@@ -1941,6 +1998,10 @@ Return nil if nothing is found."
       (jove-find-node-at child pos))
      (t
       (jove-find-child-at (cdr children) pos)))))
+
+(defun jove-find (pos)
+  (when jove-ast-complete-p
+    (jove-find-node-at jove-ast pos)))
 
 ;; Process
 ;; Initial
@@ -1965,20 +2026,52 @@ Return nil if nothing is found."
 ;; with the end of the ast node clear everything and start
 ;; over.
 
+;; TODO: Figure out how to determine if an edit has been made
+;; in a previously parsed statement, and if flushing the cache
+;; results in being located at the end of the statement directly
+;; above the current. If so attempt to parse the current statement
+;; right away, keep track of the time, if taking too long 1/60 of
+;; a second, ditch. Either way schedule a reparse. This would allow small
+;; statements to be highlighting instantly.
+
+;; What might actually be more robust would be to cache the token at the
+;; beginning of each top level statement. It would be the easiest place
+;; to know to make a copy. when a change is detected go to the last top
+;; level statement and use the saved token...
+
+;; Need some sort of protection that the children do not get double
+;; reversed.
 (defun jove-flush-ast (position)
   "Flush top level statements from `jove-ast' to POSITION."
-  (let ((children (nreverse (jove-children jove-ast))))
-    (while (and children
-                (< position (jove-end (car children))))
-      (setq children (cdr children)))
-    (let ((end (jove-end (car children))))
-      (if end
-          (progn
-            (jove-set-end jove-ast end)
-            (jove-flush-lexer-cache end)
-            (setf (nth 5 jove-ast) children))
-        (setq jove-ast nil)
-        (jove-flush-lexer-cache)))))
+  (let ((token nil)
+        (children (if jove--flushed-p
+                      (jove-children jove-ast)  ; Already reversed
+                    (nreverse (jove-children jove-ast))))
+        (looking t))
+    (while looking
+      (cond
+       ((null children)
+        (setq looking nil))
+       ;; If POSITION is less that the end of the node, decrement
+       ;; the list. 
+       ((<= position (jove-start (car children)))
+        (setq children (cdr children)))
+       ;; If POSITION is greater than the end of the initial token
+       ;; of the statement, finish. Decrement the list, set token to
+       ;; the cached token, and stop looking
+       ((> position (jove-end (jove-get-prop (car children) :token)))
+        (setq token (jove-get-prop (car children) :token)
+              children (cdr children)
+              looking nil))
+       ;; If we reach this, the edit must have been inside or directly
+       ;; after the initial token.
+       (t
+        (setq children (cdr children)))))
+    
+    (setq jove--cache token                 ; Either nil or a token.
+          jove--flushed-p t)
+    (setf (nth 1 jove-ast) nil)             ; End
+    (setf (nth 5 jove-ast) children)))      ; Children
 
 (provide 'jove-parser)
 

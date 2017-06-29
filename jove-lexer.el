@@ -30,9 +30,6 @@
 (defvar jove-keywords (make-hash-table :test 'equal)
   "Hash table to map keyword names to token types.")
 
-(defvar jove-after-ctx-update-fn nil
-  "Function called after the context stack has been updated.")
-
 (defvar jove-after-comment-hook nil
   "Hook called after the lexer has encountered a comment.")
 
@@ -598,115 +595,111 @@ the context of a left brace character."
   "Update the syntactic context stack.
 The `jove--ctx-stack' and `jove--expr-allowed' variables are
 modified to reflect the change of `jove--prev-tt'."
-  (let ((stack-ref jove--ctx-stack))
-    (cond
-     ((and (jove-tt-is-keyword tt)
-           (eq jove-DOT prev-tt))
-      ;; NOTE: What is this condition trying to catch?
-      (setq jove--expr-allowed nil))
-     ;; '{'  Enter brace statement, expression context.
-     ((eq jove-BRACE-L tt)
-      (let ((top (jove-current-ctx)))
-        (push (cond ((eq jove-J-OTAG top) jove-B-EXPR)
-                    ((eq jove-J-EXPR top) jove-B-TMPL)
-                    ((jove-brace-is-block-p prev-tt) jove-B-STAT)
-                    (t jove-B-EXPR))
-              jove--ctx-stack))
-      (setq jove--expr-allowed t))
-     ;; '}' Or ')'  Exit either brace or paren context.
-     ((memq tt (list jove-BRACE-R jove-PAREN-R))
-      (if (= 1 (length jove--ctx-stack))
-          (setq jove--expr-allowed t)
-        (let ((out (pop jove--ctx-stack)))
-          (when (and (eq jove-B-STAT out)
-                     ;; FIXME: Use a symbol rather than a string
-                     (string= "function" (jove-ctx-token (jove-current-ctx))))
-            (setq out (pop jove--ctx-stack)))
-          (setq jove--expr-allowed (not (jove-ctx-is-expr out))))))
-     ;; '('  Enter parenthesis context.
-     ((eq jove-PAREN-L tt)
-      (push (if (memq prev-tt (list jove-IF jove-FOR jove-WITH jove-WHILE))
-                jove-P-STAT
-              jove-P-EXPR)
-            jove--ctx-stack)
-      (setq jove--expr-allowed t))
-     ;; '${' Enter brace template context.
-     ((eq jove-DOLLAR-BRACE-L tt)
-      (push jove-B-TMPL jove--ctx-stack)
-      (setq jove--expr-allowed t))
-     ;; '`'  Enter or exit a template literal context.
-     ((eq jove-BACKQUOTE tt)
-      (if (eq jove-Q-TMPL (jove-current-ctx))
-          (pop jove--ctx-stack)
-        (push jove-Q-TMPL jove--ctx-stack))
-      (setq jove--expr-allowed nil))
-     ;; '--' or '++'  Do not alter `jove-expr-allowed'.
-     ((eq jove-INC-DEC tt))
-     ;; 'function'  Enter function expression context.
-     ((eq jove-FUNCTION tt)
-      (push (if (and (jove-tt-before-expr prev-tt)
-                     (not (memq prev-tt (list jove-SEMI jove-ELSE)))
-                     (not (and (memq prev-tt (list jove-COLON jove-BRACE-L))
-                               (eq jove-B-STAT (jove-current-ctx)))))
-                jove-F-EXPR
-              jove-F-STAT)
-            jove--ctx-stack)
-      (setq jove--expr-allowed nil))
-     ((eq jove-STAR tt)
-      (when (eq jove-FUNCTION prev-tt)
-        (push (if (eq jove-F-EXPR (pop jove--ctx-stack))
-                  jove-F-EXPR-GEN
-                jove-F-STAT-GEN)
-              jove--ctx-stack))
-      (setq jove--expr-allowed t))
-     ((or (and (eq jove-OF tt) (not jove--expr-allowed))
-          (and (eq jove-YIELD tt) (jove-in-generator-ctx)))
-      (setq jove--expr-allowed t))
-     ;; '<tag>'
-     ((eq jove-JSX-TAG-START tt)
-      (push jove-J-EXPR jove--ctx-stack)          ; Treat as beginning of JSX expression.
-      (push jove-J-OTAG jove--ctx-stack)          ; Start opening tag context
-      (setq jove--expr-allowed nil))
-     ;; '</tag>' or '<tag />'
-     ((eq jove-JSX-TAG-END tt)
+  (cond
+   ((and (jove-tt-is-keyword tt)
+         (eq jove-DOT prev-tt))
+    ;; NOTE: What is this condition trying to catch?
+    (setq jove--expr-allowed nil))
+   ;; '{'  Enter brace statement, expression context.
+   ((eq jove-BRACE-L tt)
+    (let ((top (jove-current-ctx)))
+      (push (cond ((eq jove-J-OTAG top) jove-B-EXPR)
+                  ((eq jove-J-EXPR top) jove-B-TMPL)
+                  ((jove-brace-is-block-p prev-tt) jove-B-STAT)
+                  (t jove-B-EXPR))
+            jove--ctx-stack))
+    (setq jove--expr-allowed t))
+   ;; '}' Or ')'  Exit either brace or paren context.
+   ((memq tt (list jove-BRACE-R jove-PAREN-R))
+    (if (= 1 (length jove--ctx-stack))
+        (setq jove--expr-allowed t)
       (let ((out (pop jove--ctx-stack)))
-        (if (or (and (eq jove-J-OTAG out)
-                     (eq jove-SLASH prev-tt))
-                (eq jove-J-CTAG out))
-            (progn
-              (pop jove--ctx-stack)
-              (setq jove--expr-allowed (eq jove-J-EXPR (jove-current-ctx))))
-          (setq jove--expr-allowed t))))
+        (when (and (eq jove-B-STAT out)
+                   ;; FIXME: Use a symbol rather than a string
+                   (string= "function" (jove-ctx-token (jove-current-ctx))))
+          (setq out (pop jove--ctx-stack)))
+        (setq jove--expr-allowed (not (jove-ctx-is-expr out))))))
+   ;; '('  Enter parenthesis context.
+   ((eq jove-PAREN-L tt)
+    (push (if (memq prev-tt (list jove-IF jove-FOR jove-WITH jove-WHILE))
+              jove-P-STAT
+            jove-P-EXPR)
+          jove--ctx-stack)
+    (setq jove--expr-allowed t))
+   ;; '${' Enter brace template context.
+   ((eq jove-DOLLAR-BRACE-L tt)
+    (push jove-B-TMPL jove--ctx-stack)
+    (setq jove--expr-allowed t))
+   ;; '`'  Enter or exit a template literal context.
+   ((eq jove-BACKQUOTE tt)
+    (if (eq jove-Q-TMPL (jove-current-ctx))
+        (pop jove--ctx-stack)
+      (push jove-Q-TMPL jove--ctx-stack))
+    (setq jove--expr-allowed nil))
+   ;; '--' or '++'  Do not alter `jove-expr-allowed'.
+   ((eq jove-INC-DEC tt))
+   ;; 'function'  Enter function expression context.
+   ((eq jove-FUNCTION tt)
+    (push (if (and (jove-tt-before-expr prev-tt)
+                   (not (memq prev-tt (list jove-SEMI jove-ELSE)))
+                   (not (and (memq prev-tt (list jove-COLON jove-BRACE-L))
+                             (eq jove-B-STAT (jove-current-ctx)))))
+              jove-F-EXPR
+            jove-F-STAT)
+          jove--ctx-stack)
+    (setq jove--expr-allowed nil))
+   ((eq jove-STAR tt)
+    (when (eq jove-FUNCTION prev-tt)
+      (push (if (eq jove-F-EXPR (pop jove--ctx-stack))
+                jove-F-EXPR-GEN
+              jove-F-STAT-GEN)
+            jove--ctx-stack))
+    (setq jove--expr-allowed t))
+   ((or (and (eq jove-OF tt) (not jove--expr-allowed))
+        (and (eq jove-YIELD tt) (jove-in-generator-ctx)))
+    (setq jove--expr-allowed t))
+   ;; '<tag>'
+   ((eq jove-JSX-TAG-START tt)
+    (push jove-J-EXPR jove--ctx-stack)          ; Treat as beginning of JSX expression.
+    (push jove-J-OTAG jove--ctx-stack)          ; Start opening tag context
+    (setq jove--expr-allowed nil))
+   ;; '</tag>' or '<tag />'
+   ((eq jove-JSX-TAG-END tt)
+    (let ((out (pop jove--ctx-stack)))
+      (if (or (and (eq jove-J-OTAG out)
+                   (eq jove-SLASH prev-tt))
+              (eq jove-J-CTAG out))
+          (progn
+            (pop jove--ctx-stack)
+            (setq jove--expr-allowed (eq jove-J-EXPR (jove-current-ctx))))
+        (setq jove--expr-allowed t))))
 
-     ;; Quoted from acorn-jsx/inject.js
-     ;;   Do not consider JSX expr -> JSX open tag -> ... anymore
+   ;; Quoted from acorn-jsx/inject.js
+   ;;   Do not consider JSX expr -> JSX open tag -> ... anymore
 
-     ;; NOTE: I do not get this. I will remove the `jove-J-EXPR' and
-     ;; when the context updates again on the `jove-J-CTAG' it will
-     ;; double pop the context stack, resulting in over removal.
+   ;; NOTE: I do not get this. I will remove the `jove-J-EXPR' and
+   ;; when the context updates again on the `jove-J-CTAG' it will
+   ;; double pop the context stack, resulting in over removal.
 
-     ;; TODO: Consider removal. I don't think this condition is
-     ;; helpful for editing. For now consider '</>' a self closing
-     ;; tag.
+   ;; TODO: Consider removal. I don't think this condition is
+   ;; helpful for editing. For now consider '</>' a self closing
+   ;; tag.
 
-     ;; Now I get it! Its to reconsider the '<' as a closing tag
-     ;; rather than a opening tag. If it is followed by a '/'.
+   ;; Now I get it! Its to reconsider the '<' as a closing tag
+   ;; rather than a opening tag. If it is followed by a '/'.
 
-     ;; Though if it runs across a '</>' it will double pop the
-     ;; context on accident.
+   ;; Though if it runs across a '</>' it will double pop the
+   ;; context on accident.
 
-     ((and (eq jove-SLASH tt)
-           (eq jove-JSX-TAG-START prev-tt))
-      (setq jove--ctx-stack (cons jove-J-CTAG
-                              (cdr (cdr jove--ctx-stack)))
-            jove--expr-allowed nil))
+   ((and (eq jove-SLASH tt)
+         (eq jove-JSX-TAG-START prev-tt))
+    (setq jove--ctx-stack (cons jove-J-CTAG
+                            (cdr (cdr jove--ctx-stack)))
+          jove--expr-allowed nil))
 
-     ;; Otherwiser `jove-expr-allowed' is set to token type slot 'before-expr'.
-     (t
-      (setq jove--expr-allowed (jove-tt-before-expr tt))))
-    (when (and jove-after-ctx-update-fn
-               (not (eq stack-ref jove--ctx-stack)))
-      (funcall jove-after-ctx-update-fn))))
+   ;; Otherwiser `jove-expr-allowed' is set to token type slot 'before-expr'.
+   (t
+    (setq jove--expr-allowed (jove-tt-before-expr tt)))))
 
 (defun jove-in-generator-ctx ()
   (let ((head (car jove--ctx-stack))
@@ -1277,11 +1270,6 @@ eol or eof is reached before the matching delimiter."
 
 (defun jove-next-token ()
   "Read next token."
-  (setq jove--prev-start jove--start
-        jove--prev-end jove--end
-        jove--prev-tt jove--tt
-        jove--prev-linum jove--linum)
-
   (let ((char nil)
         (ctx (jove-current-ctx)))
     (when (or (not ctx)
