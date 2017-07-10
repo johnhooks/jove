@@ -55,3 +55,13 @@ functions are mostly complete and untested. I have been performing
 informal tests of the parser with [[http://underscorejs.org/][Underscore]] and [[http://jquery.com][JQuery]], it seems to
 be parsing everything correctly.
 
+** Goals
+- JSX indentation is currently non-functional. The biggest hurdle is
+  combining the legacy indentation code from [[https://github.com/johnhooks/js-align][js-align]] and newer AST
+  funcationality. The end goal is to base all indentation off the AST,
+  meanwhile I want a solution that can use either method.
+
+- Auto-pairing of JSX tags.
+
+- Highlighting of JSX tag pairs.
+

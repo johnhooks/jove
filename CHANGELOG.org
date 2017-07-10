@@ -1,0 +1,12 @@
+#+TITLE:  CHANGELOG
+#+AUTHOR: John Hooks
+#+EMAIL:  john@bitmachina.com
+#+DATE:   <2017-07-10 Mon>
+#+STARTUP: indent
+#+STARTUP: hidestars
+
+** 0.3.1 
+*** Modified <2017-07-10 Mon>
+1. =jove-read-regex= and =jove-read-string=
+   Simplify the functions to use a more complex regular expression
+   rather than loops. It hasn't improved performance.

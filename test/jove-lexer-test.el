@@ -54,31 +54,27 @@
     (should (equal start (nth 0 warning)))
     (should (equal end (nth 1 warning)))))
 
-(cl-defmacro jove-test-env (content bind func)
+(cl-defmacro jove-test-env (content bind &rest body)
   ;; The test environment.
   `(let ,(append '()                    ; Put any default variables here.
                  bind)
      (with-temp-buffer
        (insert ,content)
-       (jove-mode)
-       (jove-disable-parser)
-       (jove-config-lexer)
-       (funcall ,func))))
+       (with-syntax-table jove-mode-syntax-table
+         (jove-config-lexer)
+         ,@body))))
 
 (cl-defmacro jove-deftest-lexer (name content tt &key bind value length (start 1) (depth 1))
   (declare (indent defun))
   `(ert-deftest ,(intern (format "jove-test-lex-%s" name)) ()
      (jove-test-env ,content ,bind
-                #'(lambda ()
-                    (jove-test-lexer ,depth (list ,start ,(+ start length) ,tt ,value))))))
+                (jove-test-lexer ,depth (list ,start ,(+ start length) ,tt ,value)))))
 
 (cl-defmacro jove-deftest-lexer-warning (name content &key start end bind)
   (declare (indent defun))
   `(ert-deftest ,(intern (format "jove-test-lex-warning-%s" name)) ()
      (jove-test-env ,content ,bind
-                #'(lambda ()
-                    (jove-test-lexer-warn ,start ,end)))))
-
+                (jove-test-lexer-warn ,start ,end))))
 
 ;;; Punctuation
 
@@ -392,51 +388,51 @@
 
 ;;; Regular Expressions
 
-(jove-deftest-lexer regexp-no-flags
-  "/foo ba[rR]/" jove-REGEXP :length 12)
+(jove-deftest-lexer regex-no-flags
+  "/foo ba[rR]/" jove-REGEX :length 12)
 
-(jove-deftest-lexer regexp-with-flags
-  "/foo ba[rR]/gi" jove-REGEXP :length 14)
+(jove-deftest-lexer regex-with-flags
+  "/foo ba[rR]/gi" jove-REGEX :length 14)
 
-(jove-deftest-lexer regexp-escape-closing-delimiter
-  "/foo\\/bar/" jove-REGEXP :length 10)
+(jove-deftest-lexer regex-escape-closing-delimiter
+  "/foo\\/bar/" jove-REGEX :length 10)
 
-(jove-deftest-lexer regexp-forward-slash-in-class
-  "/foo[/]bar/" jove-REGEXP :length 11)
+(jove-deftest-lexer regex-forward-slash-in-class
+  "/foo[/]bar/" jove-REGEX :length 11)
 
-(jove-deftest-lexer regexp-escape-closing-class-delimiter
-  "/foo[\\]]bar/" jove-REGEXP :length 12)
+(jove-deftest-lexer regex-escape-closing-class-delimiter
+  "/foo[\\]]bar/" jove-REGEX :length 12)
 
-(jove-deftest-lexer regexp-with-octal-escape
-  "/f[oO]*\\142a[rR]/" jove-REGEXP :length 17 :bind ((jove--strict nil)))
+(jove-deftest-lexer regex-with-octal-escape
+  "/f[oO]*\\142a[rR]/" jove-REGEX :length 17 :bind ((jove--strict nil)))
 
-(jove-deftest-lexer regexp-with-octal-escape-in-class
-  "/f[oO]*ba[\\162R]/" jove-REGEXP :length 17 :bind ((jove--strict nil)))
+(jove-deftest-lexer regex-with-octal-escape-in-class
+  "/f[oO]*ba[\\162R]/" jove-REGEX :length 17 :bind ((jove--strict nil)))
 
-(jove-deftest-lexer regexp-with-hex-escape
-  "/f[oO]*\\x62a[rR]/" jove-REGEXP :length 17)
+(jove-deftest-lexer regex-with-hex-escape
+  "/f[oO]*\\x62a[rR]/" jove-REGEX :length 17)
 
-(jove-deftest-lexer regexp-with-hex-escape-in-class
-  "/f[oO]*ba[\\x72R]/" jove-REGEXP :length 17)
+(jove-deftest-lexer regex-with-hex-escape-in-class
+  "/f[oO]*ba[\\x72R]/" jove-REGEX :length 17)
 
-(jove-deftest-lexer regexp-with-escape-sequence
-  "/f[oO]*\\u0062a[rR]/" jove-REGEXP :length 19)
+(jove-deftest-lexer regex-with-escape-sequence
+  "/f[oO]*\\u0062a[rR]/" jove-REGEX :length 19)
 
-(jove-deftest-lexer regexp-with-escape-sequence-in-class
-  "/f[oO]*ba[\\u0072R]/" jove-REGEXP :length 19)
+(jove-deftest-lexer regex-with-escape-sequence-in-class
+  "/f[oO]*ba[\\u0072R]/" jove-REGEX :length 19)
 
-(jove-deftest-lexer regexp-with-code-point
-  "/f[oO]*\\u{62}a[rR]/" jove-REGEXP :length 19)
+(jove-deftest-lexer regex-with-code-point
+  "/f[oO]*\\u{62}a[rR]/" jove-REGEX :length 19)
 
-(jove-deftest-lexer regexp-with-code-point-in-class
-  "/f[oO]*ba[\\u{72}R]/" jove-REGEXP :length 19)
+(jove-deftest-lexer regex-with-code-point-in-class
+  "/f[oO]*ba[\\u{72}R]/" jove-REGEX :length 19)
 
 ;;; Regular Expression Warnings
 
-(jove-deftest-lexer-warning regexp-missing-delimiter
+(jove-deftest-lexer-warning regex-missing-delimiter
   "/ba[rz]" :start 1 :end 8)
 
-(jove-deftest-lexer-warning regexp-missing-delimiter-class
+(jove-deftest-lexer-warning regex-missing-delimiter
   "/ba[rz/" :start 1 :end 8)
 
 ;; JSX

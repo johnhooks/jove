@@ -26,10 +26,9 @@
 
 (defun jove-test-env (body)
   `(with-temp-buffer
-     (jove-mode)
-     (jove-disable-parser)
-     (jove-config-lexer)
-     ,@body))
+     (with-syntax-table jove-mode-syntax-table
+       (jove-config-lexer)
+       ,@body)))
 
 (defmacro jove-deftest (name &rest body)
   (declare (indent defun))
@@ -478,7 +477,7 @@
           (eval
            `(jove-deftest-ctx-not-before-expr ,tt))) ; HACK!
       '(NUM
-        REGEXP
+        REGEX
         STRING
         NAME
         BOB

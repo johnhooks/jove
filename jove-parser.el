@@ -727,7 +727,7 @@ Optionally if NO-CALLS disallow the parsing of call expressions."
          (t
           id))))
      ((or (jove-tt-is-atom jove--tt)
-          (memq tt (list jove-REGEXP jove-STRING jove-NUM)))
+          (memq tt (list jove-REGEX jove-STRING jove-NUM)))
       (prog1 (jove-make-node jove--start jove--end 'literal)
         (jove-next)))
      ((eq jove-PAREN-L tt)
@@ -1882,6 +1882,7 @@ and closing tag."
               (throw 'contents nil))
             (jove-add-child node (jove-jsx-parse-element-at start-pos)))
            ((eq jove-JSX-TEXT jove--tt)
+            ;; FIX: Why not just call `jove-jsx-parse-text'.
             (jove-add-child node (jove-parse-expr-atom)))
            ((eq jove-BRACE-L jove--tt)
             (jove-add-child node (jove-jsx-parse-expression-container)))
@@ -1895,6 +1896,17 @@ and closing tag."
                (concat "Expected corresponding JSX closing tag for <"
                        (jove-get-qualified-jsx-name (car (jove-children opening)))
                        ">"))))
+
+    ;; TODO: Consider adding the ablity to parse invalid adjacent
+    ;; JSX elements.
+    
+    ;; Think about... Because an expression was not allowed the lexer
+    ;; did not update the token context to enter a JSX element. That
+    ;; would need to be modified. So far the parser makes no modifications
+    ;; to the lexer. Perhaps I should add a function to the lexer to
+    ;; control updates to its state, rather than mucking around with
+    ;; it here.
+    
     (while (and (eq jove-RELATIONAL jove--tt)
                 (string= "<" (jove-token-raw)))
       (jove-signal "Invalid adjacent JSX elements" :start jove--start :end jove--end))
