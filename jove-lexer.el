@@ -73,50 +73,53 @@ Does not include the backslash character.")
 Does not include the backslash character.")
 
 (defvar jove-string-single-quote-re
-  (rx
-   ;; Opening delimiter.
-   "'"
-   (0+ (or
-        ;; Match any characters outside an escape
-        (not (any ?\\ ?'))
-        ;; Match escaped characters.
-        (and "\\" not-newline)))
-   ;; Closing delimiter.
-   "'")
+  (eval-when-compile
+    (rx
+     ;; Opening delimiter.
+     "'"
+     (0+ (or
+          ;; Match any characters outside an escape
+          (not (any ?\\ ?'))
+          ;; Match escaped characters.
+          (and "\\" not-newline)))
+     ;; Closing delimiter.
+     "'"))
   "A regular expression for reading single quote strings.")
 
 (defvar jove-string-double-quote-re
-  (rx
-   ;; Opening delimiter.
-   "\""
-   (0+ (or
-        ;; Match any characters outside an escape
-        (not (any ?\\ ?\"))
-        ;; Match escaped characters.
-        (and "\\" not-newline)))
-   ;; Closing delimiter.
-   "\"")
+  (eval-when-compile
+    (rx
+     ;; Opening delimiter.
+     "\""
+     (0+ (or
+          ;; Match any characters outside an escape
+          (not (any ?\\ ?\"))
+          ;; Match escaped characters.
+          (and "\\" not-newline)))
+     ;; Closing delimiter.
+     "\""))
   "A regular expression for reading double quote strings.")
 
 (defvar jove-regular-expression-re
-  (rx
-   ;; Start of regex.
-   "/"
-   (0+ (or
-        ;; Match characters outside of a character class.
-        (not (any ?\[ ?/ ?\\))
-        ;; Match backslash quoted characters.
-        (and "\\" not-newline)
-        ;; Match character class.
-        ;; So first condition to or makes this where it matchs!
-        (and
-         "["
-         (0+ (or
-              (not (any ?\] ?\\))
-              (and "\\" not-newline)))
-         "]")))
-   (group "/")
-   (0+ (any ?g ?i ?m ?u ?y)))
+  (eval-when-compile
+    (rx
+     ;; Start of regex.
+     "/"
+     (0+ (or
+          ;; Match characters outside of a character class.
+          (not (any ?\[ ?/ ?\\))
+          ;; Match backslash quoted characters.
+          (and "\\" not-newline)
+          ;; Match character class.
+          ;; So first condition to or makes this where it matchs!
+          (and
+           "["
+           (0+ (or
+                (not (any ?\] ?\\))
+                (and "\\" not-newline)))
+           "]")))
+     (group "/")
+     (0+ (any ?g ?i ?m ?u ?y))))
   "Regular expression matching a JavaScript Regex literal.
 First group match is the closing delimiter.")
 
