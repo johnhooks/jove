@@ -850,19 +850,24 @@ Optionally set the token VALUE, otherwise set it to nil."
 ;; Not implementing XML-style comments for now <!--
 (defun jove-read-token-lt-gt (first)
   "Read a token starting with a ?< or ?>, FIRST indicates which."
-  (let ((second (jove-peek-char))
-        (third (jove-peek-char 2)))
-    (if (eq first second)
-        ;; << >> >>> <<= >>= >>>=
-        (if (eq ?> third)
-            (if (eq ?= (jove-peek-char 3))
-                (jove-finish-op jove-ASSIGN 4)  ; >>>=
-              (jove-finish-op jove-BITSHIFT 3)) ; >>>
-          (if (eq ?= third)
-              (jove-finish-op jove-ASSIGN 3)    ; <<= >>=
-            (jove-finish-op jove-BITSHIFT 2)))  ; << >>
-      ;; < > <= >=
-      (jove-finish-op jove-RELATIONAL (if (eq ?= second) 2 1)))))
+  (if (and (eq ?< first)
+           jove--expr-allowed
+           jove-jsx-allowed
+           (not (eq ?\! (jove-peek-char)))) ; <!
+      (jove-finish-punc jove-JSX-TAG-START)
+    (let ((second (jove-peek-char))
+          (third (jove-peek-char 2)))
+      (if (eq first second)
+          ;; << >> >>> <<= >>= >>>=
+          (if (eq ?> third)
+              (if (eq ?= (jove-peek-char 3))
+                  (jove-finish-op jove-ASSIGN 4)  ; >>>=
+                (jove-finish-op jove-BITSHIFT 3)) ; >>>
+            (if (eq ?= third)
+                (jove-finish-op jove-ASSIGN 3)    ; <<= >>=
+              (jove-finish-op jove-BITSHIFT 2)))  ; << >>
+        ;; < > <= >=
+        (jove-finish-op jove-RELATIONAL (if (eq ?= second) 2 1))))))
 
 (defun jove-read-token-eq-excl (first)
   "Read a token starting with a ?= or ?!, FIRST indicates which."
@@ -1203,11 +1208,6 @@ eol or eof is reached before the matching delimiter."
         (if (or (memq (char-syntax char) '(?w ?\\)))
             (jove-read-word)
           (jove-read-token char)))))
-     ((and (eq ?< char)
-             jove--expr-allowed
-             (not (eq ?\! (jove-peek-char)))) ; <!
-        (forward-char)
-        (jove-finish-token jove-JSX-TAG-START))
 
      ;; Continuation of standard JavaScript tokens'
 

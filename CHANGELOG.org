@@ -9,4 +9,5 @@
 *** Modified <2017-07-10 Mon>
 1. =jove-read-regex= and =jove-read-string=
    Simplify the functions to use a more complex regular expression
-   rather than loops. It hasn't improved performance.
+   rather than loops. It hasn't improved performance
+2. Move lexing of =jove-JSX-TAG-START= to =jove-read-token-lt-gt=.

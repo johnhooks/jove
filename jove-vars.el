@@ -41,6 +41,11 @@
   :type 'boolean
   :group 'jove-mode)
 
+(defcustom jove-jsx-allowed t
+  "Boolean flag to allow parsing of JSX."
+  :type 'boolean
+  :group 'jove-mode)
+
 (defcustom jove-verbose nil
   "Print information about parsing to *Messages* buffer."
   :type 'boolean
