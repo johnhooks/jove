@@ -6,8 +6,15 @@
 #+STARTUP: hidestars
 
 ** 0.3.1 
-*** Modified <2017-07-10 Mon>
+*** Added
+1. Customizable variable =jove-jsx-allowed= to enable jsx parsing.
+*** Modified
 1. =jove-read-regex= and =jove-read-string=
    Simplify the functions to use a more complex regular expression
    rather than loops. It hasn't improved performance
 2. Move lexing of =jove-JSX-TAG-START= to =jove-read-token-lt-gt=.
+3. Tokenization of JSX expressions and tags have been moved out
+   of =jove-next-token= and into their own override context
+   functions, =jove-jsx-read-expr-token= and =jove-jsx-read-tag-token=.
+*** Moved
+1. =jove-jsx-read-token= to =jove-jsx-read-expr-token=.  

@@ -393,9 +393,10 @@ pairs collected in OPTIONS."
 
 ;; JSX Context Types
 
-(defvar jove-J-OTAG (jove-make-ctx "<tag>"))
-(defvar jove-J-CTAG (jove-make-ctx "</tag>"))
-(defvar jove-J-EXPR (jove-make-ctx "<tag>...</tag>" :is-expr t :preserve-space t))
+(defvar jove-J-OTAG (jove-make-ctx "<tag>" :override #'jove-jsx-read-tag-token))
+(defvar jove-J-CTAG (jove-make-ctx "</tag>" :override #'jove-jsx-read-tag-token))
+(defvar jove-J-EXPR (jove-make-ctx "<tag>...</tag>" :is-expr t :preserve-space t
+                           :override #'jove-jsx-read-expr-token))
 
 ;;; Token
 
@@ -952,10 +953,9 @@ eol or eof is reached before the matching delimiter."
     (jove-warn jove--start (point) "missing string closing delimiter"))
   (jove-finish-token jove-STRING 'font-lock-string-face))
 
-(defun jove-read-tmpl-token ()
+(defun jove-read-tmpl-token (char)
   "Read a template string."
-  (let (char
-        (pos jove--start))
+  (let ((pos jove--start))
     (catch 'token
       (while t
         (setq pos (re-search-forward "[^`$\\\\\C-j]*" nil t)
@@ -1064,9 +1064,9 @@ eol or eof is reached before the matching delimiter."
                             'font-lock-keyword-face))
                    word)))
 
-(defun jove-jsx-read-token ()
-  (let (char
-        (looking t))
+(defun jove-jsx-read-expr-token (char)
+  "Read token from inside a JSX expression context."
+  (let ((looking t))
     (while looking
       (re-search-forward "[^<{\C-j]*")
       (setq char (char-after))
@@ -1092,6 +1092,23 @@ eol or eof is reached before the matching delimiter."
         (setq looking nil)
         ;; Is it necessary to finish the token in anyway?
         (jove-warn jove--start (point) "Unterminated JSX contents"))))))
+
+(defun jove-jsx-read-tag-token (char)
+  "Read token from inside a JSX tag context."
+  (cond
+   ((eq ?w (char-syntax char))
+    (jove-jsx-read-word))
+   ((eq ?> char)
+    (forward-char)
+    (jove-finish-token jove-JSX-TAG-END))
+   ((memq char '(?\" ?\'))
+    (forward-char)
+    (jove-jsx-read-string char))
+   (t
+    ;; Kludge
+    (if (or (memq (char-syntax char) '(?w ?\\)))
+        (jove-read-word)
+      (jove-read-token char)))))
 
 (defun jove-jsx-read-string (punc)
   ;; Not doing anything with the html entities.
@@ -1177,7 +1194,6 @@ eol or eof is reached before the matching delimiter."
     (when (or (not ctx)
               (not (jove-ctx-preserve-space ctx)))
       (jove-skip-space))
-
     ;; Initialize current token state.
     (setq jove--start (point)
           jove--value nil
@@ -1186,31 +1202,7 @@ eol or eof is reached before the matching delimiter."
      ((eobp)
       (jove-finish-token jove-EOB))
      ((jove-ctx-override ctx)
-      (funcall (jove-ctx-override ctx)))
-
-     ;; JSX additions
-     ((eq jove-J-EXPR ctx)
-      (jove-jsx-read-token))
-     ((or (eq jove-J-OTAG ctx)
-          (eq jove-J-CTAG ctx))
-      (cond
-       ((eq ?w (char-syntax char))
-        (jove-jsx-read-word))
-       ((eq ?> char)
-        (forward-char)
-        (jove-finish-token jove-JSX-TAG-END))
-       ((or (eq ?\" char)
-            (eq ?\' char))
-        (forward-char)
-        (jove-jsx-read-string char))
-       (t
-        ;; Kludge
-        (if (or (memq (char-syntax char) '(?w ?\\)))
-            (jove-read-word)
-          (jove-read-token char)))))
-
-     ;; Continuation of standard JavaScript tokens'
-
+      (funcall (jove-ctx-override ctx) char))
      ((or (memq (char-syntax char) '(?w ?\\)))
       (jove-read-word))
      (t
