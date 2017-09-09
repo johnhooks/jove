@@ -637,11 +637,17 @@ the context of a left brace character."
   "Update the syntactic context stack.
 The `jove--ctx-stack' and `jove--expr-allowed' variables are
 modified to reflect the change of `jove--prev-tt'."
+  ;; TODO: Signal an error if an incorrect context type is encountered when
+  ;; popping the context stack.
   (cond
    ((and (jove-tt-is-keyword tt)
          (eq jove-DOT prev-tt))
-    ;; NOTE: What is this condition trying to catch?
+    ;; NOTE: What is this condition trying to catch? I think it is to
+    ;; catch instances where a keyword has mistakenly been used as a
+    ;; member of an object. This prevents the token type from
+    ;; mistakenly setting `jove--expr-allowed' to t.
     (setq jove--expr-allowed nil))
+
    ;; '{'  Enter brace statement, expression context.
    ((eq jove-BRACE-L tt)
     (let ((top (jove-current-ctx)))
@@ -651,6 +657,7 @@ modified to reflect the change of `jove--prev-tt'."
                   (t jove-B-EXPR))
             jove--ctx-stack))
     (setq jove--expr-allowed t))
+
    ;; '}' Or ')'  Exit either brace or paren context.
    ((memq tt (list jove-BRACE-R jove-PAREN-R))
     (if (= 1 (length jove--ctx-stack))
@@ -661,6 +668,7 @@ modified to reflect the change of `jove--prev-tt'."
                    (string= "function" (jove-ctx-token (jove-current-ctx))))
           (setq out (pop jove--ctx-stack)))
         (setq jove--expr-allowed (not (jove-ctx-is-expr out))))))
+
    ;; '('  Enter parenthesis context.
    ((eq jove-PAREN-L tt)
     (push (if (memq prev-tt (list jove-IF jove-FOR jove-WITH jove-WHILE))
@@ -668,18 +676,22 @@ modified to reflect the change of `jove--prev-tt'."
             jove-P-EXPR)
           jove--ctx-stack)
     (setq jove--expr-allowed t))
+
    ;; '${' Enter brace template context.
    ((eq jove-DOLLAR-BRACE-L tt)
     (push jove-B-TMPL jove--ctx-stack)
     (setq jove--expr-allowed t))
+
    ;; '`'  Enter or exit a template literal context.
    ((eq jove-BACKQUOTE tt)
     (if (eq jove-Q-TMPL (jove-current-ctx))
         (pop jove--ctx-stack)
       (push jove-Q-TMPL jove--ctx-stack))
     (setq jove--expr-allowed nil))
+
    ;; '--' or '++'  Do not alter `jove-expr-allowed'.
    ((eq jove-INC-DEC tt))
+
    ;; 'function'  Enter function expression context.
    ((eq jove-FUNCTION tt)
     (push (if (and (jove-tt-before-expr prev-tt)
@@ -690,6 +702,8 @@ modified to reflect the change of `jove--prev-tt'."
             jove-F-STAT)
           jove--ctx-stack)
     (setq jove--expr-allowed nil))
+
+   ;; '**'
    ((eq jove-STAR tt)
     (when (eq jove-FUNCTION prev-tt)
       (push (if (eq jove-F-EXPR (pop jove--ctx-stack))
@@ -697,14 +711,18 @@ modified to reflect the change of `jove--prev-tt'."
               jove-F-STAT-GEN)
             jove--ctx-stack))
     (setq jove--expr-allowed t))
+
+   ;; 'of' or 'yeild'
    ((or (and (eq jove-OF tt) (not jove--expr-allowed))
         (and (eq jove-YIELD tt) (jove-in-generator-ctx)))
     (setq jove--expr-allowed t))
+
    ;; '<tag>'
    ((eq jove-JSX-TAG-START tt)
     (push jove-J-EXPR jove--ctx-stack)          ; Treat as beginning of JSX expression.
     (push jove-J-OTAG jove--ctx-stack)          ; Start opening tag context
     (setq jove--expr-allowed nil))
+
    ;; '</tag>' or '<tag />'
    ((eq jove-JSX-TAG-END tt)
     (let ((out (pop jove--ctx-stack)))
@@ -733,13 +751,14 @@ modified to reflect the change of `jove--prev-tt'."
    ;; Though if it runs across a '</>' it will double pop the
    ;; context on accident.
 
+   ;; '/>'
    ((and (eq jove-SLASH tt)
          (eq jove-JSX-TAG-START prev-tt))
     (setq jove--ctx-stack (cons jove-J-CTAG
                             (cdr (cdr jove--ctx-stack)))
           jove--expr-allowed nil))
 
-   ;; Otherwiser `jove-expr-allowed' is set to token type slot 'before-expr'.
+   ;; Otherwise set `jove-expr-allowed' to token type slot 'before-expr'.
    (t
     (setq jove--expr-allowed (jove-tt-before-expr tt)))))
 
@@ -938,7 +957,7 @@ otherwise nil."
   "Read a regular expression."
   (if (jove-eat-re jove-regular-expression-re)
       (when (< 0 (skip-syntax-forward "w_"))
-        (jove-warn jove--end (point) "invalid identifier after regexp"))
+        (jove-warn jove--end (point) "invalid identifier after regex"))
     (jove-warn (point) (goto-char (point-at-eol)) "invalid regex"))
   (jove-finish-token jove-REGEX 'font-lock-string-face))
 
@@ -962,8 +981,8 @@ eol or eof is reached before the matching delimiter."
               char (char-after))
         (cond
          ((eq ?\` char)
-          (if (and (= jove--start pos)      ; Switch from using `point'
-                   (eq jove-TEMPLATE jove--tt)) ; getting it for free from `re-search-forward'
+          (if (and (= jove--start pos)
+                   (eq jove-TEMPLATE jove--tt))
               (progn
                 (forward-char)
                 (jove-finish-token jove-BACKQUOTE 'font-lock-string-face)
@@ -972,7 +991,7 @@ eol or eof is reached before the matching delimiter."
             (throw 'token nil)))
          ((eq ?\$ char)
           (if (eq ?\{ (jove-peek-char))
-              (if (and (= jove--start jove--end)
+              (if (and (= jove--start pos)
                        (eq jove-TEMPLATE jove--tt))
                   (progn
                     (forward-char 2)
@@ -980,9 +999,7 @@ eol or eof is reached before the matching delimiter."
                     (throw 'token nil))
                 (jove-finish-token jove-TEMPLATE 'font-lock-string-face)
                 (throw 'token nil))
-            ;; Its possible to catch a single '$' which is part of the
-            ;; literal template string. So it is necessary to always
-            ;; advance at least one character.
+            ;; Its possible to catch a single '$'.
             (forward-char)))
          ((eq ?\\ char)
           (jove-read-escape-char))
@@ -993,7 +1010,7 @@ eol or eof is reached before the matching delimiter."
           (forward-char))
          (t                             ; Hit eob.
           ;; Don't run the template hook because this isn't a real template literal.
-          (jove-warn jove--start (point-max) "Missing template string closing delimiter")
+          (jove-warn jove--start (goto-char (point-max)) "missing template string closing delimiter")
           (jove-finish-token jove-TEMPLATE)
           (throw 'token nil)))))))
 
@@ -1004,7 +1021,7 @@ eol or eof is reached before the matching delimiter."
   (if (eq ?u (char-before))
         ;; The function below will warn of any invalid code points.
       (jove-read-code-point)
-    (jove-warn (- (point) 2) (point) "Invalid escape in identifier")))
+    (jove-warn (- (point) 2) (point) "invalid escape in identifier")))
 
 (defun jove-read-word-internal ()
   "Read ECMAScript Identifier."
@@ -1074,7 +1091,8 @@ eol or eof is reached before the matching delimiter."
        ((or (eq ?< char)
             (eq ?{ char))
         (if (= jove--start (point))
-            (if (and (eq ?< char) jove--expr-allowed)
+            (if (and (eq ?< char)
+                     jove--expr-allowed)
                 (progn
                   (forward-char)
                   (jove-finish-token jove-JSX-TAG-START))

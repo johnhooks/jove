@@ -36,7 +36,7 @@
 (require 'jove-lexer)
 (require 'jove-parser)
 (require 'jove-polyfill)
-(require 'js-align)
+;; (require 'js-align)
 
 (defgroup jove-mode nil
   "A JavaScript mode."
@@ -210,7 +210,7 @@ Buffer edit spans from BEG to END and is of length LEN."
   (setq-local comment-start "// ")
   (setq-local comment-end "")
 
-  (setq-local indent-line-function #'js-align-indent-line)
+  (setq-local indent-line-function #'js-indent-line)
 
   ;; Change hooks
   (add-hook 'before-change-functions #'jove--flush-caches t t)
